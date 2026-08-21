@@ -16,6 +16,8 @@ COPY login_helper.py .
 # Create data directories
 RUN mkdir -p /app/data/accounts
 
-EXPOSE 8000
+# Dynamic port support (default 8080 to avoid common 8000 conflicts)
+ENV PORT=8080
+EXPOSE 8080
 
-CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn src.app:app --host 0.0.0.0 --port ${PORT:-8080}"]
