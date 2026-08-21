@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pin Uploader Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/app.js" defer></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                📌 Pin Uploader
+            </div>
+            <nav class="sidebar-nav">
+                <ul>
+                    <li>
+                        <a href="/" class="{% if active_page == 'dashboard' %}active{% endif %}">
+                            <span class="icon">📊</span>
+                            <span class="text">Dashboard</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/accounts" class="{% if active_page == 'accounts' %}active{% endif %}">
+                            <span class="icon">👤</span>
+                            <span class="text">Accounts</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/upload" class="{% if active_page == 'upload' %}active{% endif %}">
+                            <span class="icon">📤</span>
+                            <span class="text">Upload CSV</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/history" class="{% if active_page == 'history' %}active{% endif %}">
+                            <span class="icon">📋</span>
+                            <span class="text">History</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/schedule" class="{% if active_page == 'schedule' %}active{% endif %}">
+                            <span class="icon">⏰</span>
+                            <span class="text">Schedule</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/settings" class="{% if active_page == 'settings' %}active{% endif %}">
+                            <span class="icon">⚙️</span>
+                            <span class="text">Settings</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,434 @@
+{% extends "base.html" %}
+{% set active_page = 'accounts' %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Pinterest Accounts</h1>
+    <button class="btn btn-primary" onclick="openModal('add-account-modal')">+ Add Account</button>
+</div>
+
+<!-- Explanatory Guide Card -->
+<div class="card" style="background: rgba(59, 130, 246, 0.04); border-left: 4px solid var(--primary); margin-bottom: 20px;">
+    <div class="card-body" style="padding: 16px 20px;">
+        <h4 style="font-size: 0.95rem; margin-bottom: 6px; color: var(--primary);">🔑 1-Click Browser Authentication & Session Export</h4>
+        <p style="font-size: 0.85rem; line-height: 1.5; color: var(--text-dark); margin: 0;">
+            Click <strong>🔑 Log In (Browser)</strong> to open a Pinterest window right on your screen. Once you log in, the app automatically detects it, saves your <code>state.json</code> session, and activates the account. You can also click <strong>📥 Download state.json</strong> anytime to export the session for your remote production server!
+        </p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Account Name</th>
+                    <th>Proxy Routing</th>
+                    <th>Default Batch Size</th>
+                    <th>Schedule Cadence</th>
+                    <th>Session Status</th>
+                    <th>Enabled</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for account in accounts %}
+                <tr>
+                    <td><strong>{{ account.name }}</strong></td>
+                    <td>
+                        {% if account.proxy_url %}
+                            <code style="font-size: 0.78rem; word-break: break-all;">{{ account.proxy_url }}</code>
+                        {% else %}
+                            <span class="text-muted" style="font-size: 0.85rem;">Direct (No Proxy)</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ account.batch_size }} pins/batch
+                        <span class="text-muted" style="font-size: 0.75rem;">(Max 100)</span>
+                    </td>
+                    <td>
+                        <strong style="font-size: 0.88rem; color: var(--primary);">{{ account.effective_schedule_human }}</strong>
+                        {% if not account.is_custom_schedule %}
+                        <span class="text-muted" style="font-size: 0.72rem; display: block;">(Global Default)</span>
+                        {% else %}
+                        <span class="status-badge badge-success" style="font-size: 0.68rem; padding: 1px 5px;">Custom</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if account.session_valid == True %}
+                            <span class="status-badge badge-success" title="Session active and verified">✅ Valid</span>
+                        {% elif account.session_valid == False and account.has_session_file %}
+                            <span class="status-badge badge-error" title="Session expired — click Log In (Browser) to refresh">❌ Expired</span>
+                        {% elif account.has_session_file %}
+                            <span class="status-badge badge-pending" title="Session file saved">⚪ Active</span>
+                        {% else %}
+                            <span class="status-badge badge-pending" title="No session file found">⚠️ Not Logged In</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <label class="checkbox-group">
+                            <input type="checkbox" {% if account.enabled %}checked{% endif %} onchange="toggleAccount({{ account.id }}, this.checked)">
+                        </label>
+                    </td>
+                    <td>
+                        <div class="d-flex gap-2" style="flex-wrap: wrap;">
+                            <button class="btn btn-primary btn-sm" onclick="launchLogin({{ account.id }}, '{{ account.name }}')" title="Open a browser to log in">
+                                🔑 Log In (Browser)
+                            </button>
+                            
+                            {% if account.has_session_file %}
+                            <a href="/api/accounts/{{ account.id }}/download-session" class="btn btn-secondary btn-sm" title="Download state.json to use on remote server" download>
+                                📥 Download state.json
+                            </a>
+                            {% endif %}
+
+                            <button class="btn btn-secondary btn-sm" onclick="openEditModal({{ account.id }}, '{{ account.name }}', '{{ account.proxy_url }}', {{ account.batch_size }}, '{{ account.schedule_cron }}')" title="Edit account & proxy settings">
+                                ✏️ Edit
+                            </button>
+
+                            <button class="btn btn-secondary btn-sm" onclick="openSessionModal({{ account.id }}, '{{ account.name }}')" title="Manually upload state.json">
+                                📤 Upload
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="openDeleteModal({{ account.id }}, '{{ account.name }}')">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="empty-state">
+                        <span class="icon">👥</span>
+                        <p>No accounts added yet. Click <strong>+ Add Account</strong> to set up your first Pinterest profile.</p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Browser Login Progress Modal -->
+<div class="modal-overlay" id="login-progress-modal">
+    <div class="modal" style="max-width: 540px; text-align: center;">
+        <div class="modal-header" style="justify-content: center;">
+            <span style="font-size: 1.15rem;">🌐 Pinterest Browser Login</span>
+        </div>
+        <div class="modal-body" style="padding: 24px 20px;">
+            <div style="font-size: 2.8rem; margin-bottom: 16px;" id="login-spinner">⏳</div>
+            <h3 style="font-size: 1.15rem; margin-bottom: 8px;" id="login-progress-title">Waiting for Pinterest Login...</h3>
+            <p style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 20px;" id="login-progress-msg">
+                A Chromium browser window has opened. Please enter your Pinterest credentials and complete any verification.
+            </p>
+            <div class="card" style="background: #f8fafc; border: 1px dashed var(--border-color); text-align: left; padding: 12px 16px; margin-bottom: 20px;">
+                <p style="font-size: 0.82rem; margin: 0; color: var(--text-dark);">
+                    💡 <strong>Automatic Detection:</strong> The app actively monitors your session cookies and page navigation. When you finish logging in, it will automatically save <code>state.json</code>, close the browser, and activate this account.
+                </p>
+            </div>
+            
+            <div class="d-flex justify-center gap-3" style="flex-wrap: wrap;">
+                <button type="button" class="btn btn-primary" onclick="forceSaveSession()" id="force-save-btn" style="padding: 10px 20px; font-weight: 600;">
+                    ✅ I'm Logged In — Save Session Now
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal('login-progress-modal')">Dismiss Window</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Account Modal -->
+<div class="modal-overlay" id="add-account-modal">
+    <div class="modal" style="max-width: 540px;">
+        <div class="modal-header">
+            <span>Add Pinterest Account</span>
+            <button class="modal-close" onclick="closeModal('add-account-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="add-account-form" onsubmit="event.preventDefault(); submitForm('add-account-form', '/api/accounts', 'POST', () => window.location.reload())">
+                <div class="form-group">
+                    <label for="name">Account Identifier Name</label>
+                    <input type="text" id="name" name="name" class="form-input" placeholder="e.g. fashion-pins-main" required>
+                    <p class="text-muted mt-1" style="font-size: 0.8rem;">A unique nickname for this account in your dashboard.</p>
+                </div>
+                <div class="form-group">
+                    <label for="proxy_url">Dedicated Proxy (Optional)</label>
+                    <input type="text" id="proxy_url" name="proxy_url" class="form-input" placeholder="e.g. 9.142.15.214:6370:pwgylvly:hxbo32275cd2">
+                    <p class="text-muted mt-1" style="font-size: 0.8rem;">
+                        <strong>Supported Formats:</strong> <code>IP:PORT:USER:PASS</code>, <code>http://user:pass@ip:port</code>, or <code>IP:PORT</code>.
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label for="batch_size">
+                        Default Batch Size (Pins per CSV)
+                        <span class="status-badge badge-pending" style="font-size: 0.72rem; margin-left: 6px;">Pinterest Max: 100</span>
+                    </label>
+                    <input type="number" id="batch_size" name="batch_size" class="form-input" value="100" min="1" max="100" required>
+                </div>
+                <div class="form-group">
+                    <label for="schedule_cron">Upload Schedule Cadence</label>
+                    <input type="text" id="schedule_cron" name="schedule_cron" class="form-input" placeholder="Leave empty for Global Default ({{ global_schedule_human }})">
+                    <div class="d-flex gap-2" style="flex-wrap: wrap; margin-top: 6px;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('schedule_cron').value = '0 9 */2 * *'">Every 2 days (9 AM)</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('schedule_cron').value = '30 11 */3 * *'">Every 3 days (11:30 AM)</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('schedule_cron').value = '0 14 */5 * *'">Every 5 days (2 PM)</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('schedule_cron').value = ''">Use Global Default</button>
+                    </div>
+                </div>
+                <div class="modal-footer" style="padding: 16px 0 0 0; border: none; margin-top: 16px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('add-account-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Account</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Account Modal -->
+<div class="modal-overlay" id="edit-account-modal">
+    <div class="modal" style="max-width: 540px;">
+        <div class="modal-header">
+            <span>Edit Account & Proxy</span>
+            <button class="modal-close" onclick="closeModal('edit-account-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="edit-account-form" onsubmit="event.preventDefault(); saveEditAccount()">
+                <input type="hidden" id="edit-account-id">
+                <div class="form-group">
+                    <label for="edit-name">Account Name</label>
+                    <input type="text" id="edit-name" name="name" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-proxy_url">Dedicated Proxy</label>
+                    <input type="text" id="edit-proxy_url" name="proxy_url" class="form-input" placeholder="e.g. 9.142.15.214:6370:pwgylvly:hxbo32275cd2">
+                    <p class="text-muted mt-1" style="font-size: 0.8rem;">
+                        <strong>Supported Formats:</strong> <code>IP:PORT:USER:PASS</code>, <code>http://user:pass@ip:port</code>, or <code>IP:PORT</code>.
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label for="edit-batch_size">Default Batch Size (Max 100)</label>
+                    <input type="number" id="edit-batch_size" name="batch_size" class="form-input" min="1" max="100" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-schedule_cron">Upload Schedule Cadence</label>
+                    <input type="text" id="edit-schedule_cron" name="schedule_cron" class="form-input" placeholder="Leave empty for Global Default">
+                    <div class="d-flex gap-2" style="flex-wrap: wrap; margin-top: 6px;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('edit-schedule_cron').value = '0 9 */2 * *'">Every 2 days (9 AM)</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('edit-schedule_cron').value = '30 11 */3 * *'">Every 3 days (11:30 AM)</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('edit-schedule_cron').value = '0 14 */5 * *'">Every 5 days (2 PM)</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('edit-schedule_cron').value = ''">Use Global Default</button>
+                    </div>
+                </div>
+                <div class="modal-footer" style="padding: 16px 0 0 0; border: none; margin-top: 16px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('edit-account-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Account</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Upload Session Modal -->
+<div class="modal-overlay" id="session-modal">
+    <div class="modal" style="max-width: 540px;">
+        <div class="modal-header">
+            <span id="session-modal-title">Upload Session (state.json)</span>
+            <button class="modal-close" onclick="closeModal('session-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="session-form" onsubmit="event.preventDefault(); uploadSession()">
+                <input type="hidden" id="session-account-id">
+                <div class="drop-zone" id="session-drop-zone" data-input-id="session-file">
+                    <div class="drop-zone-icon">📄</div>
+                    <div class="drop-zone-text">Drag & drop state.json here or click to browse</div>
+                    <input type="file" id="session-file" name="file" accept=".json" required>
+                </div>
+                <div class="modal-footer" style="padding: 16px 0 0 0; border: none; margin-top: 16px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('session-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Upload & Activate Session</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Modal -->
+<div class="modal-overlay" id="delete-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <span>Confirm Delete Account</span>
+            <button class="modal-close" onclick="closeModal('delete-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Are you sure you want to delete <strong id="delete-account-name">this account</strong>? This will also remove its batch queue and stored session files.</p>
+            <div class="modal-footer" style="padding: 16px 0 0 0; border: none; margin-top: 16px;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('delete-modal')">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete Account</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let accountToDelete = null;
+    let loginPollInterval = null;
+    let currentLoginAccountId = null;
+
+    function openEditModal(id, name, proxy, batchSize, cron) {
+        document.getElementById('edit-account-id').value = id;
+        document.getElementById('edit-name').value = name;
+        document.getElementById('edit-proxy_url').value = proxy || '';
+        document.getElementById('edit-batch_size').value = batchSize || 100;
+        document.getElementById('edit-schedule_cron').value = cron || '';
+        openModal('edit-account-modal');
+    }
+
+    function saveEditAccount() {
+        const id = document.getElementById('edit-account-id').value;
+        const formData = new FormData(document.getElementById('edit-account-form'));
+
+        fetch(`/api/accounts/${id}/update`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('Account updated successfully!', 'success');
+                closeModal('edit-account-modal');
+                setTimeout(() => window.location.reload(), 800);
+            } else {
+                showToast(data.error || 'Failed to update account', 'error');
+            }
+        })
+        .catch(() => showToast('Network error', 'error'));
+    }
+
+    function launchLogin(id, name) {
+        currentLoginAccountId = id;
+        document.getElementById('login-spinner').textContent = '🌐';
+        document.getElementById('login-progress-title').textContent = `Connecting to Pinterest for '${name}'...`;
+        document.getElementById('login-progress-msg').textContent = 'Opening browser window on your computer. Please log in with your Pinterest credentials...';
+        const saveBtn = document.getElementById('force-save-btn');
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = "✅ I'm Logged In — Save Session Now";
+        }
+        openModal('login-progress-modal');
+
+        fetch(`/api/accounts/${id}/launch-login`, { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast(data.message, 'info');
+                startLoginPolling(id, name);
+            } else {
+                showToast(data.error || 'Failed to launch login browser', 'error');
+                closeModal('login-progress-modal');
+            }
+        })
+        .catch(() => {
+            showToast('Network error launching browser', 'error');
+            closeModal('login-progress-modal');
+        });
+    }
+
+    function forceSaveSession() {
+        if (!currentLoginAccountId) return;
+        const btn = document.getElementById('force-save-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Saving Session...';
+        }
+
+        fetch(`/api/accounts/${currentLoginAccountId}/force-save-session`, { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('Saving session state from open browser...', 'info');
+            } else {
+                showToast(data.error || 'Could not save session', 'error');
+            }
+        })
+        .catch(() => showToast('Network error saving session', 'error'));
+    }
+
+    function startLoginPolling(id, name) {
+        if (loginPollInterval) clearInterval(loginPollInterval);
+
+        loginPollInterval = setInterval(() => {
+            fetch(`/api/accounts/${id}/login-status`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    clearInterval(loginPollInterval);
+                    document.getElementById('login-spinner').textContent = '✅';
+                    document.getElementById('login-progress-title').textContent = 'Login Detected & Saved!';
+                    document.getElementById('login-progress-msg').textContent = `Session state for '${name}' has been captured and activated successfully!`;
+                    showToast(data.message, 'success');
+                    setTimeout(() => window.location.reload(), 1500);
+                } else if (data.status === 'failed') {
+                    clearInterval(loginPollInterval);
+                    document.getElementById('login-spinner').textContent = '❌';
+                    document.getElementById('login-progress-title').textContent = 'Login Incomplete';
+                    document.getElementById('login-progress-msg').textContent = data.message || 'Browser was closed or timed out.';
+                    showToast(data.message || 'Login failed', 'error');
+                }
+            })
+            .catch(() => {});
+        }, 1500);
+    }
+
+    function toggleAccount(id, enabled) {
+        fetch(`/api/accounts/${id}/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) showToast(data.message || 'Account status updated', 'success');
+            else showToast(data.error || 'Failed to update status', 'error');
+        });
+    }
+
+    function openSessionModal(id, name) {
+        document.getElementById('session-account-id').value = id;
+        document.getElementById('session-modal-title').textContent = `Upload Session for '${name}'`;
+        document.getElementById('session-file').value = '';
+        document.querySelector('#session-drop-zone .drop-zone-text').textContent = 'Drag & drop state.json here or click to browse';
+        openModal('session-modal');
+    }
+
+    function uploadSession() {
+        const id = document.getElementById('session-account-id').value;
+        submitForm('session-form', `/api/accounts/${id}/session`, 'POST', () => {
+            closeModal('session-modal');
+            showToast('Session uploaded and verified!', 'success');
+            setTimeout(() => window.location.reload(), 1000);
+        });
+    }
+
+    function openDeleteModal(id, name) {
+        accountToDelete = id;
+        document.getElementById('delete-account-name').textContent = name ? `'${name}'` : 'this account';
+        openModal('delete-modal');
+    }
+
+    document.getElementById('confirm-delete-btn').addEventListener('click', () => {
+        if (accountToDelete) {
+            fetch(`/api/accounts/${accountToDelete}`, { method: 'DELETE' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Account deleted', 'success');
+                    window.location.reload();
+                } else {
+                    showToast(data.error || 'Failed to delete', 'error');
+                }
+            });
+        }
+    });
+
+    initDropZone('session-drop-zone', 'session-file');
+</script>
+{% endblock %}

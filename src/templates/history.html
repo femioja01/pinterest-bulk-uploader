@@ -1,0 +1,497 @@
+{% extends "base.html" %}
+{% set active_page = 'history' %}
+
+{% block content %}
+<div class="page-header d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px;">
+    <h1>Upload History & Queue Status</h1>
+    <div class="d-flex gap-2">
+        <button class="btn btn-secondary" onclick="retryAllFailed()">
+            🔄 Retry All Failed
+        </button>
+    </div>
+</div>
+
+<!-- Explanatory Guide Card -->
+<div class="card" style="background: rgba(59, 130, 246, 0.04); border-left: 4px solid var(--primary); margin-bottom: 20px;">
+    <div class="card-body" style="padding: 16px 20px;">
+        <h4 style="font-size: 0.95rem; margin-bottom: 6px; color: var(--primary);">📂 Master Campaign Progress & Queue Controls</h4>
+        <div style="font-size: 0.84rem; color: var(--text-dark); line-height: 1.5;">
+            Manage and monitor your automated pin drip. Click <strong>🚀 Upload Now</strong> on any batch to immediately upload it to Pinterest without waiting for the scheduled time. You can also <strong>Cancel</strong> or <strong>Re-queue</strong> batches at any time.
+        </div>
+    </div>
+</div>
+
+<!-- Filters and View Mode Switcher -->
+<div class="card" style="margin-bottom: 20px;">
+    <div class="card-body" style="padding: 14px 20px;">
+        <form method="GET" action="/history" id="filter-form" class="d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px;">
+            <input type="hidden" name="view_mode" id="view_mode_input" value="{{ view_mode }}">
+            
+            <div class="d-flex gap-3 align-center" style="flex-wrap: wrap;">
+                <select name="account_id" class="form-select" style="width: 200px;" onchange="this.form.submit()">
+                    <option value="0">All Accounts</option>
+                    {% for acc in accounts %}
+                    <option value="{{ acc.id }}" {% if filter_account_id == acc.id %}selected{% endif %}>{{ acc.name }}</option>
+                    {% endfor %}
+                </select>
+                <select name="status" class="form-select" style="width: 160px;" onchange="this.form.submit()">
+                    <option value="">All Statuses</option>
+                    <option value="done" {% if filter_status == 'done' %}selected{% endif %}>Done</option>
+                    <option value="pending" {% if filter_status == 'pending' %}selected{% endif %}>Pending</option>
+                    <option value="failed" {% if filter_status == 'failed' %}selected{% endif %}>Failed</option>
+                    <option value="cancelled" {% if filter_status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+                    <option value="processing" {% if filter_status == 'processing' %}selected{% endif %}>Processing</option>
+                </select>
+                {% if filter_account_id or filter_status %}
+                <a href="/history?view_mode={{ view_mode }}" class="btn btn-secondary btn-sm">Clear Filters</a>
+                {% endif %}
+            </div>
+
+            <!-- View Mode Toggler -->
+            <div class="d-flex gap-1" style="background: #f1f5f9; padding: 4px; border-radius: 8px;">
+                <button type="button" class="btn btn-sm {% if view_mode == 'grouped' %}btn-primary{% else %}btn-secondary{% endif %}" onclick="switchViewMode('grouped')" style="border: none; padding: 6px 14px;">
+                    📂 Master Groups
+                </button>
+                <button type="button" class="btn btn-sm {% if view_mode == 'flat' %}btn-primary{% else %}btn-secondary{% endif %}" onclick="switchViewMode('flat')" style="border: none; padding: 6px 14px;">
+                    📋 All Batches
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if view_mode == 'grouped' %}
+<!-- MASTER CAMPAIGN GROUPED VIEW -->
+<div class="master-groups-container">
+    {% for group in master_groups %}
+    <div class="card" style="margin-bottom: 20px; border: 1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+        <!-- Master Card Header -->
+        <div class="card-body" style="padding: 20px 24px; cursor: pointer;" onclick="toggleGroupDetails('{{ group.group_id }}')">
+            <div class="d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
+                <div>
+                    <span class="status-badge badge-pending" style="font-weight: 600; font-size: 0.8rem; margin-right: 8px;">
+                        👤 {{ group.account_name }}
+                    </span>
+                    <strong style="font-size: 1.05rem; color: var(--text-dark);">
+                        {{ group.original_filename }}
+                    </strong>
+                    <span class="text-muted" style="font-size: 0.82rem; margin-left: 8px;">
+                        • Uploaded: {{ group.created_at }}
+                    </span>
+                </div>
+
+                <div class="d-flex gap-2 align-center" style="flex-wrap: wrap;">
+                    {% if group.pending_count > 0 and group.first_pending_id %}
+                    <button class="btn btn-primary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); uploadNowBatch({{ group.first_pending_id }})" title="Immediately upload the next pending batch in line">
+                        🚀 Upload Next Now
+                    </button>
+                    {% endif %}
+
+                    {% if group.cancelled_count > 0 %}
+                    <span class="status-badge" style="background: #e2e8f0; color: #475569; font-size: 0.78rem;">
+                        🚫 {{ group.cancelled_count }} Cancelled
+                    </span>
+                    <button class="btn btn-secondary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); requeueGroup({{ group.account_id }}, '{{ group.original_filename }}')">
+                        ▶️ Re-queue All ({{ group.cancelled_count }})
+                    </button>
+                    {% endif %}
+
+                    {% if group.failed_count > 0 %}
+                    <span class="status-badge badge-error" style="font-size: 0.78rem;">
+                        ❌ {{ group.failed_count }} Failed
+                    </span>
+                    {% endif %}
+
+                    {% if group.pending_count > 0 %}
+                    <span class="status-badge badge-pending" style="font-size: 0.78rem;">
+                        ⏳ {{ group.pending_count }} Queued
+                    </span>
+                    <button class="btn btn-danger btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); cancelGroup({{ group.account_id }}, '{{ group.original_filename }}')">
+                        🚫 Cancel Remaining ({{ group.pending_count }})
+                    </button>
+                    {% endif %}
+
+                    {% if group.done_count > 0 %}
+                    <span class="status-badge badge-success" style="font-size: 0.78rem;">
+                        ✅ {{ group.done_count }} Done
+                    </span>
+                    {% endif %}
+
+                    <button class="btn btn-secondary btn-sm" id="btn-toggle-{{ group.group_id }}" style="font-size: 0.8rem; margin-left: 6px;" onclick="event.stopPropagation(); toggleGroupDetails('{{ group.group_id }}')">
+                        ▼ View {{ group.total_batches }} Batches
+                    </button>
+                </div>
+            </div>
+
+            <!-- Progress Bar Section -->
+            <div style="margin-top: 14px;">
+                <div class="d-flex justify-between align-center" style="font-size: 0.84rem; margin-bottom: 6px;">
+                    <div>
+                        <strong>{{ group.done_count }} of {{ group.total_batches }} Batches Uploaded</strong>
+                        <span class="text-muted">({{ group.total_pins }} total pins across {{ group.total_batches }} slices)</span>
+                    </div>
+                    <div style="font-weight: 700; color: {% if group.pct_done == 100 %}var(--success){% else %}var(--primary){% endif %}; font-size: 0.9rem;">
+                        {{ group.pct_done }}% Completed
+                    </div>
+                </div>
+
+                <!-- Visual Multi-segment Progress Bar -->
+                <div style="width: 100%; height: 10px; background: #e2e8f0; border-radius: 999px; overflow: hidden; display: flex;">
+                    {% if group.done_count > 0 %}
+                    <div style="width: {{ (group.done_count / group.total_batches) * 100 }}%; background: #22c55e;" title="{{ group.done_count }} Done"></div>
+                    {% endif %}
+                    {% if group.processing_count > 0 %}
+                    <div style="width: {{ (group.processing_count / group.total_batches) * 100 }}%; background: #f59e0b;" title="{{ group.processing_count }} Processing"></div>
+                    {% endif %}
+                    {% if group.failed_count > 0 %}
+                    <div style="width: {{ (group.failed_count / group.total_batches) * 100 }}%; background: #ef4444;" title="{{ group.failed_count }} Failed"></div>
+                    {% endif %}
+                    {% if group.pending_count > 0 %}
+                    <div style="width: {{ (group.pending_count / group.total_batches) * 100 }}%; background: #3b82f6;" title="{{ group.pending_count }} Queued"></div>
+                    {% endif %}
+                    {% if group.cancelled_count > 0 %}
+                    <div style="width: {{ (group.cancelled_count / group.total_batches) * 100 }}%; background: #94a3b8;" title="{{ group.cancelled_count }} Cancelled"></div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Collapsible Batch Table Details -->
+        <div id="details-{{ group.group_id }}" style="display: none; border-top: 1px solid var(--border-color); background: #fafafa;">
+            <div class="table-container" style="padding: 0;">
+                <table class="data-table" style="margin: 0; background: transparent;">
+                    <thead>
+                        <tr style="background: #f1f5f9;">
+                            <th style="padding-left: 24px;">Batch File</th>
+                            <th>Pins</th>
+                            <th>Status</th>
+                            <th>Upload Date & Time</th>
+                            <th style="padding-right: 24px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for batch in group.batches %}
+                        <tr style="border-bottom: 1px solid var(--border-color);">
+                            <td style="padding-left: 24px;">
+                                <code>{{ batch.filename }}</code>
+                            </td>
+                            <td><strong>{{ batch.pin_count }}</strong> pins</td>
+                            <td>
+                                {% if batch.status == 'done' %}
+                                    <span class="status-badge badge-success" title="Uploaded to Pinterest successfully">Done</span>
+                                {% elif batch.status == 'failed' %}
+                                    <span class="status-badge badge-error" title="Upload failed">Failed</span>
+                                    {% if batch.error_message %}
+                                    <div class="text-danger mt-1" style="font-size: 0.75rem; max-width: 200px; word-break: break-word;">{{ batch.error_message }}</div>
+                                    {% endif %}
+                                {% elif batch.status == 'pending' %}
+                                    <span class="status-badge badge-pending" title="Waiting in queue for next scheduled run">Pending</span>
+                                {% elif batch.status == 'cancelled' %}
+                                    <span class="status-badge" style="background: #e2e8f0; color: #475569;" title="Cancelled by user">Cancelled</span>
+                                {% elif batch.status == 'processing' %}
+                                    <span class="status-badge badge-processing" title="Currently uploading via Playwright browser">Processing...</span>
+                                {% else %}
+                                    <span class="status-badge badge-pending">{{ batch.status }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if batch.status == 'done' %}
+                                    <div style="font-size: 0.85rem; color: var(--success); font-weight: 600;">
+                                        ✅ {{ batch.uploaded_at if batch.uploaded_at else 'Uploaded' }}
+                                    </div>
+                                {% elif batch.status == 'pending' %}
+                                    <div style="font-size: 0.85rem; color: var(--primary); font-weight: 600;">
+                                        📅 Next: {{ batch.scheduled_time }}
+                                    </div>
+                                {% elif batch.status == 'processing' %}
+                                    <div style="font-size: 0.85rem; color: var(--warning); font-weight: 600;">
+                                        ⏳ Uploading now...
+                                    </div>
+                                {% elif batch.status == 'cancelled' %}
+                                    <div style="font-size: 0.85rem; color: var(--text-muted);">
+                                        🚫 Cancelled / Paused
+                                    </div>
+                                {% elif batch.status == 'failed' %}
+                                    <div style="font-size: 0.85rem; color: var(--danger);">
+                                        ❌ Failed
+                                    </div>
+                                {% else %}
+                                    <span class="text-muted" style="font-size: 0.85rem;">-</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding-right: 24px;">
+                                <div class="d-flex gap-2">
+                                    {% if batch.status == 'pending' %}
+                                    <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Upload this batch to Pinterest immediately">🚀 Upload Now</button>
+                                    <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); cancelBatch({{ batch.id }})" title="Cancel this scheduled batch">Cancel</button>
+                                    {% elif batch.status == 'cancelled' %}
+                                    <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Upload this batch to Pinterest immediately">🚀 Upload Now</button>
+                                    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); requeueBatch({{ batch.id }})" title="Re-queue this batch for scheduled upload">Re-queue</button>
+                                    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
+                                    {% elif batch.status == 'failed' %}
+                                    <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Retry uploading this batch now">🚀 Upload Now</button>
+                                    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
+                                    {% endif %}
+                                    <a href="/api/history/{{ batch.id }}/download" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();" title="Download this split batch CSV">Download</a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="card">
+        <div class="empty-state" style="padding: 40px 20px;">
+            <span class="icon" style="font-size: 3rem;">📂</span>
+            <p>No master CSV uploads found. Upload a CSV from the <a href="/upload">Upload CSV</a> tab to begin.</p>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% else %}
+<!-- FLAT ALL BATCHES TABLE VIEW -->
+<div class="card">
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Created Date</th>
+                    <th>Account</th>
+                    <th>Master File</th>
+                    <th>Batch File</th>
+                    <th>Pin Count</th>
+                    <th>Status</th>
+                    <th>Upload Date & Time</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for batch in batches %}
+                <tr>
+                    <td style="font-size: 0.85rem; color: var(--text-muted);">{{ batch.created_at }}</td>
+                    <td><strong>{{ batch.account_name }}</strong></td>
+                    <td style="font-size: 0.82rem; color: var(--text-dark); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ batch.original_filename }}">
+                        {{ batch.original_filename }}
+                    </td>
+                    <td><code>{{ batch.filename }}</code></td>
+                    <td>{{ batch.pin_count }} pins</td>
+                    <td>
+                        {% if batch.status == 'done' %}
+                            <span class="status-badge badge-success" title="Uploaded to Pinterest successfully">Done</span>
+                        {% elif batch.status == 'failed' %}
+                            <span class="status-badge badge-error" title="Upload failed">Failed</span>
+                            {% if batch.error_message %}
+                            <div class="text-danger mt-1" style="font-size: 0.75rem; max-width: 200px; word-break: break-word;">{{ batch.error_message }}</div>
+                            {% endif %}
+                        {% elif batch.status == 'pending' %}
+                            <span class="status-badge badge-pending" title="Waiting in queue for next scheduled run">Pending</span>
+                        {% elif batch.status == 'cancelled' %}
+                            <span class="status-badge" style="background: #e2e8f0; color: #475569;" title="Cancelled by user">Cancelled</span>
+                        {% elif batch.status == 'processing' %}
+                            <span class="status-badge badge-processing" title="Currently uploading via Playwright browser">Processing...</span>
+                        {% else %}
+                            <span class="status-badge badge-pending">{{ batch.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if batch.status == 'done' %}
+                            <div style="font-size: 0.85rem; color: var(--success); font-weight: 600;">
+                                ✅ {{ batch.uploaded_at if batch.uploaded_at else batch.created_at }}
+                            </div>
+                        {% elif batch.status == 'pending' %}
+                            <div style="font-size: 0.85rem; color: var(--primary); font-weight: 600;">
+                                📅 Next: {{ batch.scheduled_time }}
+                            </div>
+                        {% elif batch.status == 'processing' %}
+                            <div style="font-size: 0.85rem; color: var(--warning); font-weight: 600;">
+                                ⏳ Uploading now...
+                            </div>
+                        {% elif batch.status == 'cancelled' %}
+                            <div style="font-size: 0.85rem; color: var(--text-muted);">
+                                🚫 Cancelled / Paused
+                            </div>
+                        {% elif batch.status == 'failed' %}
+                            <div style="font-size: 0.85rem; color: var(--danger);">
+                                ❌ Failed
+                            </div>
+                        {% else %}
+                            <span class="text-muted" style="font-size: 0.85rem;">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="d-flex gap-2">
+                            {% if batch.status == 'pending' %}
+                            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Upload this batch to Pinterest immediately">🚀 Upload Now</button>
+                            <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); cancelBatch({{ batch.id }})" title="Cancel this scheduled batch">Cancel</button>
+                            {% elif batch.status == 'cancelled' %}
+                            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Upload this batch to Pinterest immediately">🚀 Upload Now</button>
+                            <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); requeueBatch({{ batch.id }})" title="Re-queue this batch for scheduled upload">Re-queue</button>
+                            <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
+                            {% elif batch.status == 'failed' %}
+                            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Retry uploading this batch now">🚀 Upload Now</button>
+                            <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
+                            {% endif %}
+                            <a href="/api/history/{{ batch.id }}/download" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();" title="Download this split batch CSV">Download</a>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="empty-state">
+                        <span class="icon">📋</span>
+                        <p>No upload history found. Upload a CSV from the <a href="/upload">Upload CSV</a> tab to start.</p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function switchViewMode(mode) {
+        document.getElementById('view_mode_input').value = mode;
+        document.getElementById('filter-form').submit();
+    }
+
+    function toggleGroupDetails(groupId) {
+        const detailsEl = document.getElementById(`details-${groupId}`);
+        const btnEl = document.getElementById(`btn-toggle-${groupId}`);
+        if (!detailsEl) return;
+
+        if (detailsEl.style.display === 'none' || !detailsEl.style.display) {
+            detailsEl.style.display = 'block';
+            if (btnEl) btnEl.textContent = '▲ Hide Batches';
+        } else {
+            detailsEl.style.display = 'none';
+            if (btnEl) btnEl.textContent = btnEl.textContent.replace('▲ Hide', '▼ View');
+        }
+    }
+
+    function uploadNowBatch(batchId) {
+        showToast('🚀 Launching automated upload to Pinterest...', 'info');
+
+        fetch(`/api/history/${batchId}/upload-now`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast(data.message || 'Upload started in background!', 'success');
+                    setTimeout(() => window.location.reload(), 1500);
+                } else {
+                    showToast(data.error || 'Failed to start upload', 'error');
+                }
+            })
+            .catch(() => showToast('Network error starting upload', 'error'));
+    }
+
+    function cancelBatch(batchId) {
+        if (!confirm('Are you sure you want to cancel this scheduled batch and remove it from the upload queue?')) return;
+
+        fetch(`/api/history/${batchId}/cancel`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast(data.message || 'Batch cancelled', 'success');
+                    setTimeout(() => window.location.reload(), 800);
+                } else {
+                    showToast(data.error || 'Failed to cancel batch', 'error');
+                }
+            })
+            .catch(() => showToast('Network error', 'error'));
+    }
+
+    function requeueBatch(batchId) {
+        fetch(`/api/history/${batchId}/requeue`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast(data.message || 'Batch re-queued for scheduled upload', 'success');
+                    setTimeout(() => window.location.reload(), 800);
+                } else {
+                    showToast(data.error || 'Failed to re-queue batch', 'error');
+                }
+            })
+            .catch(() => showToast('Network error', 'error'));
+    }
+
+    function cancelGroup(accountId, originalFilename) {
+        if (!confirm(`Are you sure you want to CANCEL all remaining scheduled batches for '${originalFilename}'?`)) return;
+
+        fetch('/api/history/cancel-group', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ account_id: accountId, original_filename: originalFilename })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast(data.message || 'Scheduled batches cancelled', 'success');
+                setTimeout(() => window.location.reload(), 800);
+            } else {
+                showToast(data.error || 'Failed to cancel batches', 'error');
+            }
+        })
+        .catch(() => showToast('Network error', 'error'));
+    }
+
+    function requeueGroup(accountId, originalFilename) {
+        fetch('/api/history/requeue-group', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ account_id: accountId, original_filename: originalFilename })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast(data.message || 'Batches re-queued for scheduled upload', 'success');
+                setTimeout(() => window.location.reload(), 800);
+            } else {
+                showToast(data.error || 'Failed to re-queue batches', 'error');
+            }
+        })
+        .catch(() => showToast('Network error', 'error'));
+    }
+
+    function deleteBatch(batchId) {
+        if (!confirm('Permanently delete this batch from the database? This cannot be undone.')) return;
+
+        fetch(`/api/history/${batchId}/delete`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast(data.message || 'Batch deleted', 'success');
+                    setTimeout(() => window.location.reload(), 800);
+                } else {
+                    showToast(data.error || 'Failed to delete batch', 'error');
+                }
+            })
+            .catch(() => showToast('Network error', 'error'));
+    }
+
+    function retryBatch(batchId) {
+        uploadNowBatch(batchId);
+    }
+
+    function retryAllFailed() {
+        fetch('/api/history/retry-all-failed', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast(data.message || 'Retrying all failed batches...', 'success');
+                    setTimeout(() => window.location.reload(), 1200);
+                } else {
+                    showToast(data.error || 'Failed to retry batches', 'error');
+                }
+            })
+            .catch(() => showToast('Network error', 'error'));
+    }
+</script>
+{% endblock %}

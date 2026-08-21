@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% set active_page = 'dashboard' %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard Overview</h1>
+</div>
+
+<div class="stat-cards">
+    <div class="stat-card">
+        <div class="stat-icon" style="color: var(--primary); background-color: rgba(59, 130, 246, 0.1);">👤</div>
+        <div class="stat-details">
+            <h3>Connected Accounts</h3>
+            <div class="stat-value" id="stat-total-accounts">{{ total_accounts | default(0) }}</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon" style="color: var(--success); background-color: rgba(34, 197, 94, 0.1);">📤</div>
+        <div class="stat-details">
+            <h3>Today's Uploads</h3>
+            <div class="stat-value" id="stat-today-uploads">{{ todays_uploads | default(0) }}</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon" style="color: var(--warning); background-color: rgba(245, 158, 11, 0.1);">⏳</div>
+        <div class="stat-details">
+            <h3>Queue Pending Batches</h3>
+            <div class="stat-value" id="stat-pending-batches">{{ pending_batches | default(0) }}</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon" style="color: var(--danger); background-color: rgba(239, 68, 68, 0.1);">❌</div>
+        <div class="stat-details">
+            <h3>Failed Batches</h3>
+            <div class="stat-value" id="stat-failed-batches">{{ failed_batches | default(0) }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Workflow Steps Card -->
+<div class="card" style="background: #ffffff; margin-bottom: 24px;">
+    <div class="card-header">🚀 3-Step Automation Workflow</div>
+    <div class="card-body">
+        <div class="d-flex gap-4" style="flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid var(--border-color);">
+                <div style="font-weight: 600; color: var(--primary); margin-bottom: 6px;">1. Connect Account</div>
+                <p style="font-size: 0.82rem; color: var(--text-muted); margin: 0;">
+                    Add your account in <a href="/accounts">Accounts</a> and upload its <code>state.json</code> session generated via the local login script.
+                </p>
+            </div>
+            <div style="flex: 1; min-width: 220px; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid var(--border-color);">
+                <div style="font-weight: 600; color: var(--primary); margin-bottom: 6px;">2. Upload Master CSV</div>
+                <p style="font-size: 0.82rem; color: var(--text-muted); margin: 0;">
+                    Drop your master CSV in <a href="/upload">Upload CSV</a>. The app auto-splits it into ≤100 pin batches and puts them in your queue.
+                </p>
+            </div>
+            <div style="flex: 1; min-width: 220px; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid var(--border-color);">
+                <div style="font-weight: 600; color: var(--primary); margin-bottom: 6px;">3. Set Schedule Cadence</div>
+                <p style="font-size: 0.82rem; color: var(--text-muted); margin: 0;">
+                    Choose your run interval in <a href="/schedule">Schedule</a> (e.g. Every 2 days). The app will automatically upload 1 batch per interval.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-between align-center">
+        <span>Quick Upload Actions</span>
+    </div>
+    <div class="card-body">
+        {% if accounts %}
+            <div class="d-flex gap-3" style="flex-wrap: wrap;">
+                {% for account in accounts %}
+                <a href="/upload" class="btn btn-secondary">
+                    📤 Upload CSV for {{ account.name }}
+                </a>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="text-muted">No accounts configured yet. <a href="/accounts">Add an account</a> to get started.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        Recent Activity
+    </div>
+    <div class="card-body">
+        {% if recent_activity %}
+            <ul class="activity-feed">
+                {% for item in recent_activity %}
+                <li>
+                    <div class="activity-icon">
+                        {% if item.event_type == 'success' %}✅
+                        {% elif item.event_type == 'error' %}❌
+                        {% elif item.event_type == 'warning' %}⚠️
+                        {% else %}ℹ️{% endif %}
+                    </div>
+                    <div class="activity-content">
+                        <p><strong>{{ item.account_name }}:</strong> {{ item.message }}</p>
+                        <div class="activity-time">{{ item.timestamp }}</div>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <div class="empty-state">
+                <span class="icon">📭</span>
+                <p>No recent activity</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

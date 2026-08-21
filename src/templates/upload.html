@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% set active_page = 'upload' %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Upload CSV</h1>
+</div>
+
+<!-- Workflow Guidance Banner -->
+<div class="card" style="background: rgba(59, 130, 246, 0.04); border-left: 4px solid var(--primary); margin-bottom: 20px;">
+    <div class="card-body" style="padding: 16px 20px;">
+        <h4 style="font-size: 0.95rem; margin-bottom: 6px; color: var(--primary);">💡 How Master CSV Splitting & Uploading Works</h4>
+        <p style="font-size: 0.85rem; line-height: 1.5; color: var(--text-dark); margin: 0;">
+            Pinterest limits bulk uploads to <strong>max 100 pins per CSV</strong>. When you upload a master CSV (e.g. 300 pins), this app automatically slices it into individual batch files (e.g. 3 batches of 100 pins) with all required headers preserved. The batches are placed in your account queue and dripped safely across your scheduled days.
+        </p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form id="upload-form">
+            <div class="form-group">
+                <label for="account_id">Target Pinterest Account</label>
+                <select id="account_id" name="account_id" class="form-select" required onchange="updateAccountBatchSize(this)">
+                    <option value="">-- Choose an Account --</option>
+                    {% for account in accounts %}
+                    <option value="{{ account.id }}" data-batch-size="{{ account.batch_size }}" {% if accounts|length == 1 %}selected{% endif %}>
+                        {{ account.name }} (Default batch: {{ account.batch_size }} pins)
+                    </option>
+                    {% endfor %}
+                </select>
+                <p class="text-muted mt-1" style="font-size: 0.8rem;">Select which Pinterest account this CSV belongs to. Make sure the account has an active session state uploaded.</p>
+            </div>
+            
+            <div class="form-group">
+                <label for="batch_size">
+                    Batch Size (Pins per CSV)
+                    <span class="status-badge badge-pending" style="font-size: 0.72rem; margin-left: 6px;">Pinterest Limit: Max 100</span>
+                </label>
+                <input type="number" id="batch_size" name="batch_size" class="form-input" value="{{ accounts[0].batch_size if accounts|length == 1 else 100 }}" min="1" max="100" required onchange="triggerPreviewIfFilePresent()">
+                <p class="text-muted mt-1" style="font-size: 0.8rem;">
+                    <strong>Why this matters:</strong> Pinterest's bulk upload page only accepts up to 100 rows per file. Setting this to <code>100</code> creates fewer files. If you schedule 50 pins/day, a 100-pin batch covers 2 days of pins. If you schedule 20 pins/day, it covers 5 days.
+                </p>
+            </div>
+
+            <div class="form-group">
+                <label>Master CSV File</label>
+                <div class="drop-zone" id="csv-drop-zone" data-input-id="csv-file">
+                    <div class="drop-zone-icon">📊</div>
+                    <div class="drop-zone-text" id="drop-zone-text">Drag & drop your pins CSV here or click to browse</div>
+                    <div class="drop-zone-hint" style="color: var(--text-muted); font-size: 0.8rem; margin-top: 6px;">
+                        Supports Comma (<code>,</code>) or Tab (<code>\t</code>) separated files. Required columns: <code>Title</code>, <code>Media URL</code>, <code>Pinterest Board</code>.
+                    </div>
+                    <input type="file" id="csv-file" name="file" accept=".csv,.tsv,.txt" required onchange="handleFileInputChange(this)">
+                </div>
+                <p class="text-muted mt-1" style="font-size: 0.8rem;">
+                    Pinterest automatically routes each pin to the board specified in your CSV's <code>Pinterest Board</code> column.
+                </p>
+            </div>
+
+            <!-- Error banner for preview errors -->
+            <div id="preview-error" class="card" style="display: none; background: #fef2f2; border: 1px solid #f87171; margin-top: 16px;">
+                <div class="card-body" style="padding: 14px 18px; color: #991b1b; font-size: 0.88rem;">
+                    <strong>❌ CSV Error:</strong> <span id="preview-error-text"></span>
+                </div>
+            </div>
+
+            <!-- Preview & Action Section -->
+            <div id="preview-section" style="display: none; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-color);">
+                <h3 style="margin-bottom: 8px; font-size: 1.1rem;">CSV Preview & Splitting Calculation</h3>
+                <div id="preview-stats" class="text-muted" style="margin-bottom: 16px; font-size: 0.9rem;"></div>
+                <div class="table-container" style="margin-bottom: 20px; max-height: 280px; overflow-y: auto;">
+                    <table class="data-table preview-table">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Board</th>
+                                <th>Link</th>
+                                <th>Media URL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="preview-tbody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="card" style="background: #f8fafc; border: 1px dashed var(--border-color); margin-bottom: 20px;">
+                    <div class="card-body" style="padding: 16px;">
+                        <h4 style="font-size: 0.9rem; margin-bottom: 8px;">Choose How to Process These Batches:</h4>
+                        <div style="font-size: 0.84rem; color: var(--text-muted); line-height: 1.6;">
+                            <div>🚀 <strong>Upload Now (Background):</strong> Immediately splits the CSV and launches a background browser to upload the <strong>first batch</strong> right away, placing subsequent batches in your queue for your scheduled cadence.</div>
+                            <div style="margin-top: 4px;">📋 <strong>Queue for Scheduled Run:</strong> Splits the CSV and adds all batches to the pending queue. The scheduler will automatically drip them 1 batch at a time according to your <a href="/schedule">Schedule</a> settings.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-3" style="flex-wrap: wrap;">
+                    <button type="button" class="btn btn-primary" id="btn-upload-now" onclick="submitUpload('/api/upload/now')">🚀 Upload 1st Batch Now & Queue Rest</button>
+                    <button type="button" class="btn btn-secondary" id="btn-upload-queue" onclick="submitUpload('/api/upload/queue')">📋 Queue All Batches for Scheduled Drip</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function updateAccountBatchSize(selectEl) {
+        const selected = selectEl.options[selectEl.selectedIndex];
+        const defaultBatch = selected.getAttribute('data-batch-size');
+        if (defaultBatch) {
+            document.getElementById('batch_size').value = defaultBatch;
+        }
+        triggerPreviewIfFilePresent();
+    }
+
+    function triggerPreviewIfFilePresent() {
+        const fileInput = document.getElementById('csv-file');
+        if (fileInput && fileInput.files && fileInput.files.length) {
+            customPreviewCsv(fileInput.files[0]);
+        }
+    }
+
+    function handleFileInputChange(inputEl) {
+        if (inputEl.files && inputEl.files.length) {
+            const file = inputEl.files[0];
+            const textEl = document.getElementById('drop-zone-text');
+            if (textEl) {
+                textEl.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+            }
+            customPreviewCsv(file);
+        }
+    }
+
+    function submitUpload(endpoint) {
+        const accountSelect = document.getElementById('account_id');
+        if (!accountSelect.value) {
+            showToast('Please select a Pinterest account first', 'error');
+            accountSelect.focus();
+            return;
+        }
+
+        const fileInput = document.getElementById('csv-file');
+        if (!fileInput.files || !fileInput.files.length) {
+            showToast('Please select a CSV file to upload', 'error');
+            return;
+        }
+
+        const btnNow = document.getElementById('btn-upload-now');
+        const btnQueue = document.getElementById('btn-upload-queue');
+        if (btnNow) { btnNow.disabled = true; btnNow.textContent = '⏳ Processing...'; }
+        if (btnQueue) { btnQueue.disabled = true; btnQueue.textContent = '⏳ Processing...'; }
+        showToast('Splitting CSV and processing batches...', 'info');
+
+        const formData = new FormData(document.getElementById('upload-form'));
+
+        fetch(endpoint, {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast(data.message || 'CSV successfully processed and queued!', 'success');
+                setTimeout(() => {
+                    window.location.href = '/history';
+                }, 1200);
+            } else {
+                showToast(data.error || 'Failed to process CSV', 'error');
+                if (btnNow) { btnNow.disabled = false; btnNow.textContent = '🚀 Upload 1st Batch Now & Queue Rest'; }
+                if (btnQueue) { btnQueue.disabled = false; btnQueue.textContent = '📋 Queue All Batches for Scheduled Drip'; }
+            }
+        })
+        .catch(err => {
+            showToast('Network error while processing CSV', 'error');
+            if (btnNow) { btnNow.disabled = false; btnNow.textContent = '🚀 Upload 1st Batch Now & Queue Rest'; }
+            if (btnQueue) { btnQueue.disabled = false; btnQueue.textContent = '📋 Queue All Batches for Scheduled Drip'; }
+        });
+    }
+
+    function customPreviewCsv(file) {
+        if (!file) return;
+
+        const errorBox = document.getElementById('preview-error');
+        const previewSection = document.getElementById('preview-section');
+        errorBox.style.display = 'none';
+
+        const batchSizeInput = document.getElementById('batch_size');
+        const batchSize = batchSizeInput ? batchSizeInput.value : 100;
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('batch_size', batchSize);
+
+        fetch('/api/upload/preview', {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                errorBox.style.display = 'block';
+                document.getElementById('preview-error-text').textContent = data.error;
+                previewSection.style.display = 'none';
+                showToast(data.error, 'error');
+                return;
+            }
+
+            errorBox.style.display = 'none';
+            previewSection.style.display = 'block';
+            const boardCount = data.boards ? data.boards.length : 0;
+            document.getElementById('preview-stats').innerHTML = 
+                `📊 <strong>${data.row_count} total pins</strong> across <strong>${boardCount} board(s)</strong> (${data.boards.join(', ')}). ` +
+                `Will be automatically split into <span style="color: var(--primary); font-weight: bold;">${data.batch_count} batch(es)</span> (max ${data.batch_size} pins per batch).`;
+                
+            const tbody = document.getElementById('preview-tbody');
+            if (tbody && data.sample_rows) {
+                tbody.innerHTML = '';
+                data.sample_rows.forEach(row => {
+                    const title = row['Title'] || row['title'] || '';
+                    const board = row['Pinterest Board'] || row['board_name'] || row['board'] || '';
+                    const link = row['Link'] || row['link'] || '';
+                    const mediaUrl = row['Media URL'] || row['image_url'] || row['media_url'] || '';
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><strong>${escapeHtml(title)}</strong></td>
+                        <td><span class="status-badge badge-pending">${escapeHtml(board)}</span></td>
+                        <td><a href="${escapeHtml(link)}" target="_blank" style="font-size: 0.85rem;">${escapeHtml(link)}</a></td>
+                        <td>${mediaUrl ? '<a href="'+escapeHtml(mediaUrl)+'" target="_blank" class="btn btn-secondary btn-sm">View Media</a>' : '-'}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        })
+        .catch(err => {
+            errorBox.style.display = 'block';
+            document.getElementById('preview-error-text').textContent = 'Failed to analyze CSV file.';
+            showToast('Failed to generate preview', 'error');
+        });
+    }
+
+    initDropZone('csv-drop-zone', 'csv-file', customPreviewCsv);
+
+    // Automatically sync initial batch size from preselected account on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        const acctSelect = document.getElementById('account_id');
+        if (acctSelect && acctSelect.value) {
+            updateAccountBatchSize(acctSelect);
+        }
+    });
+</script>
+{% endblock %}

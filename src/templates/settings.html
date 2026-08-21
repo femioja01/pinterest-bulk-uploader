@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% set active_page = 'settings' %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Settings</h1>
+</div>
+
+<form id="settings-form" onsubmit="event.preventDefault(); submitForm('settings-form', '/api/settings', 'POST')">
+    <div class="card">
+        <div class="card-header">Telegram Notifications</div>
+        <div class="card-body">
+            <div class="form-group">
+                <label for="telegram_bot_token">Bot Token</label>
+                <div class="d-flex gap-2">
+                    <input type="password" id="telegram_bot_token" name="telegram_bot_token" class="form-input" placeholder="e.g. 1234567890:ABCdefGhIJKlmNoPQRsTUVwxyZ" value="{{ settings.telegram_bot_token }}">
+                    <button type="button" class="btn btn-secondary" onclick="togglePassword('telegram_bot_token')">👁️</button>
+                </div>
+                <p class="text-muted mt-1" style="font-size: 0.8rem;">Create a bot with <strong>@BotFather</strong> on Telegram to get your API Token.</p>
+            </div>
+            
+            <div class="form-group">
+                <label for="telegram_chat_id">Chat ID (Your Numerical Telegram ID)</label>
+                <input type="text" id="telegram_chat_id" name="telegram_chat_id" class="form-input" placeholder="e.g. 987654321" value="{{ settings.telegram_chat_id }}">
+                <p class="text-muted mt-1" style="font-size: 0.8rem;">
+                    <strong>How to get your Chat ID:</strong> Message <strong>@userinfobot</strong> or <strong>@RawDataBot</strong> on Telegram to see your numerical ID.<br>
+                    ⚠️ <strong>Critical:</strong> You must open a chat with your bot in Telegram and click <strong>Start</strong> (<code>/start</code>) first so Telegram permits the bot to message you.
+                </p>
+            </div>
+
+            <div class="form-group">
+                <label>Notify on</label>
+                <div class="d-flex gap-4 mt-2" style="flex-wrap: wrap;">
+                    <label class="checkbox-group">
+                        <input type="checkbox" name="notify_on_success" {% if settings.notify_on_success %}checked{% endif %}> Upload Success
+                    </label>
+                    <label class="checkbox-group">
+                        <input type="checkbox" name="notify_on_failure" {% if settings.notify_on_failure %}checked{% endif %}> Upload Failure
+                    </label>
+                    <label class="checkbox-group">
+                        <input type="checkbox" name="notify_on_session_expiry" {% if settings.notify_on_session_expiry %}checked{% endif %}> Session Expired
+                    </label>
+                    <label class="checkbox-group">
+                        <input type="checkbox" name="notify_on_low_queue" {% if settings.notify_on_low_queue %}checked{% endif %}> ⚠️ Queue Running Low
+                    </label>
+                    <label class="checkbox-group">
+                        <input type="checkbox" name="notify_daily_summary" {% if settings.notify_daily_summary %}checked{% endif %}> Daily Summary
+                    </label>
+                </div>
+            </div>
+
+            <button type="button" class="btn btn-secondary mt-3" id="btn-test-telegram" onclick="testTelegram()">Send Test Message</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">Upload & Queue Cadence</div>
+        <div class="card-body">
+            <div class="form-group">
+                <label for="default_batch_size">Default Batch Size (Pins per CSV)</label>
+                <input type="number" id="default_batch_size" name="default_batch_size" class="form-input" value="{{ settings.default_batch_size }}" min="1" max="100">
+                <p class="text-muted mt-1" style="font-size: 0.82rem;">Pinterest allows a maximum of 100 pins per CSV file. Master CSVs will be split into batches of this size.</p>
+            </div>
+            
+            <div class="form-group">
+                <label for="batches_per_run">Batches Uploaded Per Scheduled Run</label>
+                <input type="number" id="batches_per_run" name="batches_per_run" class="form-input" value="{{ settings.batches_per_run | default(1) }}" min="1">
+                <p class="text-muted mt-1" style="font-size: 0.82rem;">
+                    Recommended: <strong>1 batch per run</strong>. For example, if a 100-pin batch covers 2 days of pins and your schedule is set to run every 2 days, 1 batch will be uploaded each cycle to safely drip your content over time.
+                </p>
+            </div>
+
+            <div class="form-group">
+                <label for="low_queue_threshold">Low Queue Warning Threshold (Batches Remaining)</label>
+                <input type="number" id="low_queue_threshold" name="low_queue_threshold" class="form-input" value="{{ settings.low_queue_threshold | default(2) }}" min="0" max="20">
+                <p class="text-muted mt-1" style="font-size: 0.82rem;">
+                    When an account's remaining pending batches reach or fall below this number, you'll receive a Telegram alert to upload a new Master CSV before the schedule runs dry.
+                </p>
+            </div>
+
+            <div class="form-group">
+                <label for="timezone">Timezone</label>
+                <input type="text" id="timezone" name="timezone" class="form-input" value="{{ settings.timezone }}">
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-between align-center mb-4">
+        <button type="submit" class="btn btn-primary" style="padding: 12px 24px; font-size: 1rem;">Save All Settings</button>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function togglePassword(id) {
+        const input = document.getElementById(id);
+        if (input.type === 'password') {
+            input.type = 'text';
+        } else {
+            input.type = 'password';
+        }
+    }
+
+    function testTelegram() {
+        const token = document.getElementById('telegram_bot_token').value;
+        const chat = document.getElementById('telegram_chat_id').value;
+        const btn = document.getElementById('btn-test-telegram');
+
+        if (!token || !chat) {
+            showToast('Please fill in both Bot Token and Chat ID', 'error');
+            return;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ Sending test message...';
+        }
+
+        fetch('/api/settings/test-telegram', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bot_token: token, chat_id: chat })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('✅ Test message sent! Check your Telegram.', 'success');
+            } else {
+                showToast(data.error || 'Failed to send test message', 'error');
+            }
+        })
+        .catch(() => showToast('Network error connecting to server', 'error'))
+        .finally(() => {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Send Test Message';
+            }
+        });
+    }
+</script>
+{% endblock %}
