@@ -16,7 +16,7 @@
     <div class="card-body" style="padding: 16px 20px;">
         <h4 style="font-size: 0.95rem; margin-bottom: 6px; color: var(--primary);">📂 Master Campaign Progress & Queue Controls</h4>
         <div style="font-size: 0.84rem; color: var(--text-dark); line-height: 1.5;">
-            Manage and monitor your automated pin drip. Click <strong>📅 Edit Dates</strong> on any queued batch to adjust or re-time pin publish dates before they upload. Click <strong>🚀 Upload Now</strong> to upload immediately to Pinterest.
+            Manage and monitor your automated pin drip. Click <strong>⏱️ Reschedule</strong> on any queued batch to adjust when it will upload (individually or cascading all subsequent batches). Click <strong>🚀 Upload Now</strong> to upload immediately to Pinterest.
         </div>
     </div>
 </div>
@@ -84,6 +84,12 @@
                     {% if group.pending_count > 0 and group.first_pending_id %}
                     <button class="btn btn-primary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); uploadNowBatch({{ group.first_pending_id }})" title="Immediately upload the next pending batch in line">
                         🚀 Upload Next Now
+                    </button>
+                    {% endif %}
+
+                    {% if group.pending_count > 0 %}
+                    <button class="btn btn-secondary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); openGroupRescheduleModal({{ group.account_id }}, '{{ group.original_filename }}', {{ group.pending_count }})" title="Reschedule all pending batches in this master campaign">
+                        ⏱️ Reschedule Queue ({{ group.pending_count }})
                     </button>
                     {% endif %}
 
@@ -165,7 +171,7 @@
                             <th style="padding-left: 24px;">Batch File</th>
                             <th>Pins</th>
                             <th>Status</th>
-                            <th>Upload Date & Time</th>
+                            <th>Scheduled Upload Time</th>
                             <th style="padding-right: 24px;">Actions</th>
                         </tr>
                     </thead>
@@ -200,8 +206,13 @@
                                         ✅ {{ batch.uploaded_at if batch.uploaded_at else 'Uploaded' }}
                                     </div>
                                 {% elif batch.status == 'pending' %}
-                                    <div style="font-size: 0.85rem; color: var(--primary); font-weight: 600;">
-                                        📅 Next: {{ batch.scheduled_time }}
+                                    <div class="d-flex align-center gap-2" style="flex-wrap: wrap;">
+                                        <div style="font-size: 0.85rem; color: var(--primary); font-weight: 600;">
+                                            📅 {{ batch.scheduled_time }}
+                                        </div>
+                                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 7px; height: auto;" onclick="event.stopPropagation(); openRescheduleModal({{ batch.id }}, '{{ batch.filename }}', '{{ batch.raw_scheduled_time }}')" title="Change when this batch will automatically upload">
+                                            ⏱️ Reschedule
+                                        </button>
                                     </div>
                                 {% elif batch.status == 'processing' %}
                                     <div style="font-size: 0.85rem; color: var(--warning); font-weight: 600;">
@@ -221,9 +232,6 @@
                             </td>
                             <td style="padding-right: 24px;">
                                 <div class="d-flex gap-2">
-                                    {% if batch.status != 'done' %}
-                                    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openDateModal({{ batch.id }})" title="View and edit pin publish dates inside this batch CSV">📅 Edit Dates</button>
-                                    {% endif %}
                                     {% if batch.status == 'pending' %}
                                     <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Upload this batch to Pinterest immediately">🚀 Upload Now</button>
                                     <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); cancelBatch({{ batch.id }})" title="Cancel this scheduled batch">Cancel</button>
@@ -268,7 +276,7 @@
                     <th>Batch File</th>
                     <th>Pin Count</th>
                     <th>Status</th>
-                    <th>Upload Date & Time</th>
+                    <th>Scheduled Upload Time</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -306,8 +314,13 @@
                                 ✅ {{ batch.uploaded_at if batch.uploaded_at else batch.created_at }}
                             </div>
                         {% elif batch.status == 'pending' %}
-                            <div style="font-size: 0.85rem; color: var(--primary); font-weight: 600;">
-                                📅 Next: {{ batch.scheduled_time }}
+                            <div class="d-flex align-center gap-2" style="flex-wrap: wrap;">
+                                <div style="font-size: 0.85rem; color: var(--primary); font-weight: 600;">
+                                    📅 {{ batch.scheduled_time }}
+                                </div>
+                                <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 7px; height: auto;" onclick="event.stopPropagation(); openRescheduleModal({{ batch.id }}, '{{ batch.filename }}', '{{ batch.raw_scheduled_time }}')" title="Change when this batch will automatically upload">
+                                    ⏱️ Reschedule
+                                </button>
                             </div>
                         {% elif batch.status == 'processing' %}
                             <div style="font-size: 0.85rem; color: var(--warning); font-weight: 600;">
@@ -327,9 +340,6 @@
                     </td>
                     <td>
                         <div class="d-flex gap-2">
-                            {% if batch.status != 'done' %}
-                            <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openDateModal({{ batch.id }})" title="View and edit pin publish dates inside this batch CSV">📅 Edit Dates</button>
-                            {% endif %}
                             {% if batch.status == 'pending' %}
                             <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Upload this batch to Pinterest immediately">🚀 Upload Now</button>
                             <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); cancelBatch({{ batch.id }})" title="Cancel this scheduled batch">Cancel</button>
@@ -359,123 +369,80 @@
 </div>
 {% endif %}
 
-<!-- MODAL: UPDATE PUBLISH DATES -->
-<div id="modal-dates" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.6); z-index: 9999; align-items: center; justify-content: center; backdrop-filter: blur(2px);">
-    <div class="modal" style="background: #ffffff; border-radius: 12px; width: 90%; max-width: 680px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2); overflow: hidden;">
+<!-- MODAL: RESCHEDULE AUTOMATED UPLOAD (SINGLE OR CASCADE) -->
+<div id="modal-reschedule" class="modal-overlay" style="display: none; position: fixed; inset: 0; width: 100%; height: 100%; background: rgba(15,23,42,0.65); z-index: 99999; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+    <div class="modal" style="background: #ffffff; border-radius: 12px; width: 90%; max-width: 540px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.25); overflow: hidden; transform: translateY(0);">
         <!-- Modal Header -->
-        <div class="modal-header d-flex justify-between align-center" style="padding: 16px 24px; border-bottom: 1px solid var(--border-color); background: #f8fafc;">
+        <div class="modal-header d-flex justify-between align-center" style="padding: 16px 22px; border-bottom: 1px solid var(--border-color); background: #f8fafc;">
             <div>
-                <h3 style="margin: 0; font-size: 1.15rem; color: var(--text-dark);" id="modal-date-title">📅 Update Publish Dates & Times</h3>
-                <div class="text-muted" style="font-size: 0.8rem; margin-top: 2px;" id="modal-date-subtitle">Batch: batch_001.csv (50 pins)</div>
+                <h3 style="margin: 0; font-size: 1.15rem; color: var(--text-dark);" id="reschedule-title">⏱️ Reschedule Automated Upload</h3>
+                <div class="text-muted" style="font-size: 0.8rem; margin-top: 2px;" id="reschedule-subtitle">Batch: batch_001.csv</div>
             </div>
-            <button type="button" class="btn btn-ghost" onclick="closeDateModal()" style="font-size: 1.2rem; line-height: 1; padding: 4px 8px; border: none; background: transparent; cursor: pointer;">✕</button>
+            <button type="button" class="btn btn-ghost" onclick="closeRescheduleModal()" style="font-size: 1.2rem; line-height: 1; padding: 4px 8px; border: none; background: transparent; cursor: pointer;">✕</button>
         </div>
 
-        <!-- Modal Body (Scrollable) -->
-        <div class="modal-body" style="padding: 20px 24px; overflow-y: auto; flex: 1;">
-            <!-- Current Date Range Info -->
-            <div style="background: #f1f5f9; border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; margin-bottom: 18px;" class="d-flex justify-between align-center">
-                <div>
-                    <strong style="color: var(--text-dark);">Current Publish Window:</strong>
-                    <span id="modal-current-range" class="text-muted" style="margin-left: 6px;">Loading...</span>
-                </div>
-                <span class="status-badge badge-pending" id="modal-pin-count-badge">0 pins</span>
+        <!-- Modal Body -->
+        <div class="modal-body" style="padding: 20px 22px;">
+            <!-- Target Upload Datetime -->
+            <div class="form-group" style="margin-bottom: 18px;">
+                <label for="reschedule-datetime"><strong>Target Upload Date & Time</strong></label>
+                <input type="datetime-local" id="reschedule-datetime" class="form-input" style="width: 100%; font-size: 0.95rem; margin-top: 4px;">
+                <p class="text-muted" style="font-size: 0.78rem; margin-top: 4px;">The exact date and time the system will upload this batch to Pinterest.</p>
             </div>
 
-            <!-- Mode Switcher Tabs -->
-            <div class="d-flex gap-2 mb-3" style="border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
-                <button type="button" class="btn btn-sm btn-primary" id="tab-btn-auto" onclick="switchDateTab('auto')">⚡ Auto-Schedule (Start + Interval)</button>
-                <button type="button" class="btn btn-sm btn-secondary" id="tab-btn-shift" onclick="switchDateTab('shift')">⏱️ Shift Dates (+/-)</button>
-                <button type="button" class="btn btn-sm btn-secondary" id="tab-btn-manual" onclick="switchDateTab('manual')">📝 Table View / Custom</button>
-            </div>
-
-            <!-- TAB 1: AUTO SCHEDULE -->
-            <div id="tab-content-auto">
-                <div class="form-group" style="margin-bottom: 14px;">
-                    <label for="auto-start-datetime"><strong>Starting Date & Time</strong></label>
-                    <input type="datetime-local" id="auto-start-datetime" class="form-input" style="width: 100%;">
-                    <p class="text-muted" style="font-size: 0.78rem; margin-top: 4px;">When the very first pin in this batch should be published.</p>
+            <!-- Scope Choice (Radio options) -->
+            <div class="form-group" style="margin-bottom: 18px;">
+                <label style="margin-bottom: 8px; display: block;"><strong>Reschedule Scope:</strong></label>
+                
+                <div style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 10px; cursor: pointer;" onclick="document.getElementById('scope-single').checked = true; toggleCascadeOptions();">
+                    <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0;">
+                        <input type="radio" name="reschedule_scope" id="scope-single" value="single" checked onchange="toggleCascadeOptions()" style="margin-top: 3px;">
+                        <div>
+                            <strong style="font-size: 0.9rem; color: var(--text-dark);">Option 1: Update this batch only</strong>
+                            <div class="text-muted" style="font-size: 0.78rem; margin-top: 2px;">Only change the upload time for this specific batch. Other batches remain unchanged.</div>
+                        </div>
+                    </label>
                 </div>
 
-                <div class="form-group" style="margin-bottom: 14px;">
-                    <label for="auto-interval"><strong>Interval Between Pins</strong></label>
-                    <select id="auto-interval" class="form-select" style="width: 100%;" onchange="toggleCustomInterval(this.value)">
-                        <option value="30">Every 30 Minutes</option>
-                        <option value="60">Every 1 Hour</option>
-                        <option value="120" selected>Every 2 Hours (Recommended)</option>
-                        <option value="180">Every 3 Hours</option>
-                        <option value="240">Every 4 Hours</option>
-                        <option value="360">Every 6 Hours</option>
-                        <option value="720">Every 12 Hours</option>
-                        <option value="1440">Every 1 Day (24 Hours - Daily)</option>
-                        <option value="2880">Every 2 Days (48 Hours)</option>
-                        <option value="custom">Custom Minutes...</option>
+                <div style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; cursor: pointer;" onclick="document.getElementById('scope-cascade').checked = true; toggleCascadeOptions();">
+                    <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0;">
+                        <input type="radio" name="reschedule_scope" id="scope-cascade" value="cascade" onchange="toggleCascadeOptions()" style="margin-top: 3px;">
+                        <div>
+                            <strong style="font-size: 0.9rem; color: var(--primary);">Option 2: Readjust all subsequent batches (Auto-Cascade)</strong>
+                            <div class="text-muted" style="font-size: 0.78rem; margin-top: 2px;">Automatically recalculate and space out all following pending batches in the queue.</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Cascade Spacing Options (Conditional) -->
+            <div id="cascade-options-group" style="display: none; background: rgba(59, 130, 246, 0.04); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; padding: 14px; margin-bottom: 14px;">
+                <label for="cascade-interval" style="font-size: 0.85rem; color: var(--primary);"><strong>Spacing Interval Between Batches:</strong></label>
+                <select id="cascade-interval" class="form-select" style="width: 100%; margin-top: 4px;" onchange="toggleCustomCascade(this.value)">
+                    <option value="1_days">Every 1 Day (24 Hours - Daily Drip)</option>
+                    <option value="2_days" selected>Every 2 Days (48 Hours - Recommended)</option>
+                    <option value="3_days">Every 3 Days (72 Hours)</option>
+                    <option value="4_days">Every 4 Days</option>
+                    <option value="7_days">Every 1 Week (7 Days)</option>
+                    <option value="12_hours">Every 12 Hours (Twice a Day)</option>
+                    <option value="custom">Custom Spacing...</option>
+                </select>
+
+                <div id="custom-cascade-group" style="display: none; margin-top: 10px;" class="d-flex gap-2">
+                    <input type="number" id="custom-cascade-val" class="form-input" min="1" value="2" style="width: 100px;">
+                    <select id="custom-cascade-unit" class="form-select" style="flex: 1;">
+                        <option value="days" selected>Days</option>
+                        <option value="hours">Hours</option>
                     </select>
-                </div>
-
-                <div class="form-group" id="group-custom-interval" style="display: none; margin-bottom: 14px;">
-                    <label for="auto-custom-minutes">Custom Interval (Minutes)</label>
-                    <input type="number" id="auto-custom-minutes" class="form-input" min="5" value="90">
-                </div>
-
-                <div class="d-flex gap-3" style="margin-bottom: 14px;">
-                    <div style="flex: 1;">
-                        <label for="auto-daily-start" style="font-size: 0.85rem;"><strong>Daily Window Start</strong></label>
-                        <input type="time" id="auto-daily-start" class="form-input" value="09:00">
-                    </div>
-                    <div style="flex: 1;">
-                        <label for="auto-daily-end" style="font-size: 0.85rem;"><strong>Daily Window End</strong></label>
-                        <input type="time" id="auto-daily-end" class="form-input" value="21:00">
-                    </div>
-                </div>
-                <p class="text-muted" style="font-size: 0.78rem;">Pins will only be scheduled within this active posting window each day, rolling over to the next day automatically.</p>
-            </div>
-
-            <!-- TAB 2: SHIFT DATES -->
-            <div id="tab-content-shift" style="display: none;">
-                <p style="font-size: 0.85rem; color: var(--text-dark); margin-bottom: 14px;">
-                    Shift all existing dates in this batch forward or backward while preserving their exact time spacing.
-                </p>
-                <div class="d-flex gap-3" style="margin-bottom: 14px;">
-                    <div style="flex: 1;">
-                        <label for="shift-days"><strong>Shift Days</strong></label>
-                        <input type="number" id="shift-days" class="form-input" value="1" placeholder="+/- Days">
-                    </div>
-                    <div style="flex: 1;">
-                        <label for="shift-hours"><strong>Shift Hours</strong></label>
-                        <input type="number" id="shift-hours" class="form-input" value="0" placeholder="+/- Hours">
-                    </div>
-                </div>
-            </div>
-
-            <!-- TAB 3: MANUAL TABLE / PREVIEW -->
-            <div id="tab-content-manual" style="display: none;">
-                <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 10px;">
-                    You can edit the Publish Date of any pin individually below:
-                </p>
-                <div style="max-height: 240px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px;">
-                    <table class="data-table" style="margin: 0; font-size: 0.82rem;">
-                        <thead>
-                            <tr style="background: #f8fafc; position: sticky; top: 0;">
-                                <th style="width: 40px;">#</th>
-                                <th>Pin Title</th>
-                                <th>Board</th>
-                                <th style="width: 200px;">Publish Date</th>
-                            </tr>
-                        </thead>
-                        <tbody id="modal-table-rows">
-                            <!-- Populated dynamically via JS -->
-                        </tbody>
-                    </table>
                 </div>
             </div>
         </div>
 
         <!-- Modal Footer -->
-        <div class="modal-footer d-flex justify-between align-center" style="padding: 16px 24px; border-top: 1px solid var(--border-color); background: #f8fafc;">
-            <button type="button" class="btn btn-secondary" onclick="closeDateModal()">Cancel</button>
-            <button type="button" class="btn btn-primary" id="btn-save-dates" onclick="saveBatchDates()">
-                💾 Save & Update Batch CSV
+        <div class="modal-footer d-flex justify-between align-center" style="padding: 14px 22px; border-top: 1px solid var(--border-color); background: #f8fafc;">
+            <button type="button" class="btn btn-secondary" onclick="closeRescheduleModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-save-reschedule" onclick="saveReschedule()">
+                💾 Save Upload Schedule
             </button>
         </div>
     </div>
@@ -485,9 +452,10 @@
 
 {% block scripts %}
 <script>
-    let activeBatchId = null;
-    let activeBatchData = null;
-    let activeDateTab = 'auto';
+    let activeRescheduleBatchId = null;
+    let isGroupMode = false;
+    let groupAccountId = null;
+    let groupOriginalFilename = null;
 
     function switchViewMode(mode) {
         document.getElementById('view_mode_input').value = mode;
@@ -508,150 +476,136 @@
         }
     }
 
-    function openDateModal(batchId) {
-        activeBatchId = batchId;
-        const modal = document.getElementById('modal-dates');
-        if (!modal) {
-            console.error('Modal element #modal-dates not found in DOM');
-            return;
+    function openRescheduleModal(batchId, filename, rawDate) {
+        activeRescheduleBatchId = batchId;
+        isGroupMode = false;
+        groupAccountId = null;
+        groupOriginalFilename = null;
+
+        const modal = document.getElementById('modal-reschedule');
+        if (!modal) return;
+
+        document.getElementById('reschedule-title').textContent = '⏱️ Reschedule Automated Upload';
+        document.getElementById('reschedule-subtitle').textContent = `Batch: ${filename}`;
+        document.getElementById('scope-single').checked = true;
+        toggleCascadeOptions();
+
+        // Populate datetime input
+        let defaultDt = '';
+        if (rawDate && rawDate.length >= 16) {
+            defaultDt = rawDate.substring(0, 16);
+        } else {
+            const now = new Date();
+            now.setHours(9, 0, 0, 0); // Default to 9:00 AM tomorrow
+            now.setDate(now.getDate() + 1);
+            const tzOffset = now.getTimezoneOffset() * 60000;
+            defaultDt = new Date(now.getTime() - tzOffset).toISOString().substring(0, 16);
         }
+        document.getElementById('reschedule-datetime').value = defaultDt;
 
         modal.classList.add('active');
         modal.style.setProperty('display', 'flex', 'important');
         modal.style.setProperty('opacity', '1', 'important');
         modal.style.setProperty('visibility', 'visible', 'important');
-
-        document.getElementById('modal-date-subtitle').textContent = 'Loading batch CSV dates...';
-        document.getElementById('modal-current-range').textContent = 'Fetching dates...';
-
-        fetch(`/api/history/${batchId}/dates`)
-            .then(res => res.json())
-            .then(data => {
-                if (!data.success) {
-                    showToast(data.error || 'Failed to load batch dates', 'error');
-                    closeDateModal();
-                    return;
-                }
-                activeBatchData = data;
-                document.getElementById('modal-date-subtitle').textContent = `Batch: ${data.filename} (${data.account_name})`;
-                document.getElementById('modal-pin-count-badge').textContent = `${data.total_pins} pins`;
-
-                if (data.first_date && data.last_date) {
-                    document.getElementById('modal-current-range').textContent = `${data.first_date.replace('T', ' ').substring(0, 16)} → ${data.last_date.replace('T', ' ').substring(0, 16)}`;
-                } else {
-                    document.getElementById('modal-current-range').textContent = 'No dates set in CSV';
-                }
-
-                // Default starting datetime: now + 1 hour or existing first date
-                const now = new Date();
-                now.setHours(now.getHours() + 1);
-                now.setMinutes(0);
-                now.setSeconds(0);
-                
-                // Format for datetime-local: YYYY-MM-DDTHH:MM
-                const defaultStart = data.first_date ? data.first_date.substring(0, 16) : now.toISOString().substring(0, 16);
-                document.getElementById('auto-start-datetime').value = defaultStart;
-
-                // Populate manual table
-                renderManualTable(data.rows);
-            })
-            .catch(err => {
-                console.error('Fetch error for batch dates:', err);
-                showToast('Error loading batch dates', 'error');
-                closeDateModal();
-            });
     }
 
-    function closeDateModal() {
-        const modal = document.getElementById('modal-dates');
+    function openGroupRescheduleModal(accountId, origFilename, pendingCount) {
+        activeRescheduleBatchId = null;
+        isGroupMode = true;
+        groupAccountId = accountId;
+        groupOriginalFilename = origFilename;
+
+        const modal = document.getElementById('modal-reschedule');
+        if (!modal) return;
+
+        document.getElementById('reschedule-title').textContent = '⏱️ Reschedule Master Queue';
+        document.getElementById('reschedule-subtitle').textContent = `Campaign: ${origFilename} (${pendingCount} queued batches)`;
+        
+        // Force cascade mode for group
+        document.getElementById('scope-cascade').checked = true;
+        toggleCascadeOptions();
+
+        const now = new Date();
+        now.setHours(9, 0, 0, 0);
+        now.setDate(now.getDate() + 1);
+        const tzOffset = now.getTimezoneOffset() * 60000;
+        document.getElementById('reschedule-datetime').value = new Date(now.getTime() - tzOffset).toISOString().substring(0, 16);
+
+        modal.classList.add('active');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
+    }
+
+    function closeRescheduleModal() {
+        const modal = document.getElementById('modal-reschedule');
         if (modal) {
             modal.classList.remove('active');
             modal.style.setProperty('display', 'none', 'important');
             modal.style.setProperty('opacity', '0', 'important');
             modal.style.setProperty('visibility', 'hidden', 'important');
         }
-        activeBatchId = null;
-        activeBatchData = null;
+        activeRescheduleBatchId = null;
+        isGroupMode = false;
     }
 
-    window.addEventListener('DOMContentLoaded', () => {
-        const modal = document.getElementById('modal-dates');
-        if (modal) {
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) closeDateModal();
-            });
-        }
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeDateModal();
-        });
-    });
-
-    function switchDateTab(tab) {
-        activeDateTab = tab;
-        document.getElementById('tab-btn-auto').className = tab === 'auto' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
-        document.getElementById('tab-btn-shift').className = tab === 'shift' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
-        document.getElementById('tab-btn-manual').className = tab === 'manual' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
-
-        document.getElementById('tab-content-auto').style.display = tab === 'auto' ? 'block' : 'none';
-        document.getElementById('tab-content-shift').style.display = tab === 'shift' ? 'block' : 'none';
-        document.getElementById('tab-content-manual').style.display = tab === 'manual' ? 'block' : 'none';
+    function toggleCascadeOptions() {
+        const isCascade = document.getElementById('scope-cascade').checked;
+        document.getElementById('cascade-options-group').style.display = isCascade ? 'block' : 'none';
     }
 
-    function toggleCustomInterval(val) {
-        document.getElementById('group-custom-interval').style.display = val === 'custom' ? 'block' : 'none';
+    function toggleCustomCascade(val) {
+        document.getElementById('custom-cascade-group').style.display = val === 'custom' ? 'flex' : 'none';
     }
 
-    function renderManualTable(rows) {
-        const tbody = document.getElementById('modal-table-rows');
-        tbody.innerHTML = '';
-        if (!rows || rows.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center" style="padding: 16px;">No rows</td></tr>';
+    function saveReschedule() {
+        const targetDt = document.getElementById('reschedule-datetime').value;
+        if (!targetDt) {
+            showToast('Please select a target upload date and time', 'error');
             return;
         }
 
-        rows.forEach(r => {
-            const tr = document.createElement('tr');
-            const dateVal = (r.publish_date || '').replace(' ', 'T').substring(0, 16);
-            tr.innerHTML = `
-                <td><strong>${r.index + 1}</strong></td>
-                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${r.title}">${r.title || '-'}</td>
-                <td style="max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${r.board}">${r.board || '-'}</td>
-                <td>
-                    <input type="datetime-local" class="form-input manual-row-date" data-index="${r.index}" value="${dateVal}" style="padding: 4px 8px; font-size: 0.8rem; width: 100%;">
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-    }
-
-    function saveBatchDates() {
-        if (!activeBatchId) return;
-
-        const btn = document.getElementById('btn-save-dates');
+        const isCascade = document.getElementById('scope-cascade').checked;
+        const btn = document.getElementById('btn-save-reschedule');
         btn.disabled = true;
         btn.textContent = 'Saving...';
 
-        let payload = { mode: activeDateTab };
+        let intervalVal = 2;
+        let intervalUnit = 'days';
 
-        if (activeDateTab === 'auto') {
-            const startVal = document.getElementById('auto-start-datetime').value;
-            let interval = document.getElementById('auto-interval').value;
-            if (interval === 'custom') {
-                interval = document.getElementById('auto-custom-minutes').value;
-            }
-            payload.start_datetime = startVal;
-            payload.interval_minutes = parseInt(interval) || 120;
-            payload.daily_start = document.getElementById('auto-daily-start').value || '09:00';
-            payload.daily_end = document.getElementById('auto-daily-end').value || '21:00';
-        } else if (activeDateTab === 'shift') {
-            payload.shift_days = parseInt(document.getElementById('shift-days').value) || 0;
-            payload.shift_hours = parseInt(document.getElementById('shift-hours').value) || 0;
-        } else if (activeDateTab === 'manual') {
-            const inputs = document.querySelectorAll('.manual-row-date');
-            payload.dates = Array.from(inputs).map(inp => inp.value);
+        const selectVal = document.getElementById('cascade-interval').value;
+        if (selectVal === 'custom') {
+            intervalVal = parseInt(document.getElementById('custom-cascade-val').value) || 1;
+            intervalUnit = document.getElementById('custom-cascade-unit').value || 'days';
+        } else {
+            const parts = selectVal.split('_');
+            intervalVal = parseInt(parts[0]) || 2;
+            intervalUnit = parts[1] || 'days';
         }
 
-        fetch(`/api/history/${activeBatchId}/update-dates`, {
+        let url = '';
+        let payload = {};
+
+        if (isGroupMode) {
+            url = '/api/history/reschedule-group';
+            payload = {
+                account_id: groupAccountId,
+                original_filename: groupOriginalFilename,
+                target_datetime: targetDt,
+                interval_value: intervalVal,
+                interval_unit: intervalUnit
+            };
+        } else {
+            url = `/api/history/${activeRescheduleBatchId}/reschedule-upload`;
+            payload = {
+                target_datetime: targetDt,
+                cascade: isCascade,
+                interval_value: intervalVal,
+                interval_unit: intervalUnit
+            };
+        }
+
+        fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -659,20 +613,19 @@
         .then(res => res.json())
         .then(data => {
             btn.disabled = false;
-            btn.textContent = '💾 Save & Update Batch CSV';
-
+            btn.textContent = '💾 Save Upload Schedule';
             if (data.success) {
-                showToast(data.message || 'Publish dates updated successfully!', 'success');
-                closeDateModal();
-                setTimeout(() => window.location.reload(), 1200);
+                showToast(data.message || 'Upload schedule updated successfully!', 'success');
+                closeRescheduleModal();
+                setTimeout(() => window.location.reload(), 1000);
             } else {
-                showToast(data.error || 'Failed to update dates', 'error');
+                showToast(data.error || 'Failed to update upload schedule', 'error');
             }
         })
         .catch(err => {
             btn.disabled = false;
-            btn.textContent = '💾 Save & Update Batch CSV';
-            showToast('Network error saving dates', 'error');
+            btn.textContent = '💾 Save Upload Schedule';
+            showToast('Network error updating schedule', 'error');
         });
     }
 
@@ -793,5 +746,17 @@
             })
             .catch(() => showToast('Network error', 'error'));
     }
+
+    window.addEventListener('DOMContentLoaded', () => {
+        const modal = document.getElementById('modal-reschedule');
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeRescheduleModal();
+            });
+        }
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeRescheduleModal();
+        });
+    });
 </script>
 {% endblock %}

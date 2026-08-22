@@ -45,22 +45,37 @@ def _get_batch_schedule_map(session) -> dict[int, str]:
 
         try:
             parts = cron_expr.strip().split()
-            if len(parts) == 5:
-                trigger = CronTrigger.from_crontab(cron_expr, timezone=tz)
-                current_time = datetime.now(tz)
-                for b in pending_batches:
+            trigger = CronTrigger.from_crontab(cron_expr, timezone=tz) if len(parts) == 5 else None
+            current_time = datetime.now(tz)
+
+            for b in pending_batches:
+                if b.scheduled_upload_at:
+                    dt = b.scheduled_upload_at
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc).astimezone(tz)
+                    else:
+                        dt = dt.astimezone(tz)
+                    schedule_map[b.id] = dt.strftime("%Y-%m-%d %H:%M %Z")
+                elif trigger:
                     next_fire = trigger.get_next_fire_time(None, current_time)
                     if next_fire:
                         schedule_map[b.id] = next_fire.strftime("%Y-%m-%d %H:%M %Z")
                         current_time = next_fire + timedelta(seconds=1)
                     else:
                         schedule_map[b.id] = "Next scheduled cycle"
-            else:
-                for b in pending_batches:
+                else:
                     schedule_map[b.id] = "Next scheduled cycle"
         except Exception:
             for b in pending_batches:
-                schedule_map[b.id] = "Next scheduled cycle"
+                if b.scheduled_upload_at:
+                    dt = b.scheduled_upload_at
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc).astimezone(tz)
+                    else:
+                        dt = dt.astimezone(tz)
+                    schedule_map[b.id] = dt.strftime("%Y-%m-%d %H:%M %Z")
+                else:
+                    schedule_map[b.id] = "Next scheduled cycle"
 
     return schedule_map
 
@@ -205,11 +220,13 @@ async def history_page(
         for b in flat_batches:
             acct_name = account_name_map.get(b.account_id, "Unknown")
             scheduled_time = schedule_map.get(b.id, "")
+            raw_sched = b.scheduled_upload_at.strftime("%Y-%m-%dT%H:%M") if b.scheduled_upload_at else ""
             batch_list.append({
                 "id": b.id,
                 "created_at": b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else "",
                 "uploaded_at": b.uploaded_at.strftime("%Y-%m-%d %H:%M") if b.uploaded_at else "",
                 "scheduled_time": scheduled_time,
+                "raw_scheduled_time": raw_sched,
                 "account_name": acct_name,
                 "account_id": b.account_id,
                 "filename": b.filename,
@@ -248,6 +265,7 @@ async def history_page(
                 if b.status == BatchStatus.PENDING and first_pending_id is None:
                     first_pending_id = b.id
 
+                raw_sched = b.scheduled_upload_at.strftime("%Y-%m-%dT%H:%M") if b.scheduled_upload_at else ""
                 b_details.append({
                     "id": b.id,
                     "filename": b.filename,
@@ -256,6 +274,7 @@ async def history_page(
                     "error_message": b.error_message or "",
                     "uploaded_at": b.uploaded_at.strftime("%Y-%m-%d %H:%M") if b.uploaded_at else "",
                     "scheduled_time": schedule_map.get(b.id, ""),
+                    "raw_scheduled_time": raw_sched,
                 })
 
             master_groups.append({
@@ -865,4 +884,175 @@ async def update_batch_dates(batch_id: int, data: dict = Body(...)):
         "first_date": new_dates[0] if new_dates else "",
         "last_date": new_dates[-1] if new_dates else "",
     }
+
+
+@router.post("/api/history/{batch_id}/reschedule-upload", response_class=JSONResponse)
+async def reschedule_upload(batch_id: int, data: dict = Body(...)):
+    """Reschedule the automated upload date & time for a batch, with optional auto-cascade to subsequent batches."""
+    target_dt_str = data.get("target_datetime", "").strip()
+    cascade = bool(data.get("cascade", False))
+    interval_value = int(data.get("interval_value", 2))
+    interval_unit = str(data.get("interval_unit", "days")).lower()
+
+    if not target_dt_str:
+        return JSONResponse({"error": "Target upload date and time is required."}, status_code=400)
+
+    factory = get_session_factory()
+    with factory() as session:
+        tz_str = get_setting(session, "timezone", "Africa/Lagos")
+        try:
+            tz = zoneinfo.ZoneInfo(tz_str)
+        except Exception:
+            tz = zoneinfo.ZoneInfo("Africa/Lagos")
+
+        try:
+            clean_dt_str = target_dt_str.replace("T", " ")
+            if len(clean_dt_str) == 16:
+                clean_dt_str += ":00"
+            naive_dt = datetime.strptime(clean_dt_str, "%Y-%m-%d %H:%M:%S")
+            # Localize to account timezone and convert to UTC for storage
+            local_dt = naive_dt.replace(tzinfo=tz)
+            utc_start_dt = local_dt.astimezone(timezone.utc)
+        except Exception as e:
+            return JSONResponse({"error": f"Invalid datetime format '{target_dt_str}': {e}"}, status_code=400)
+
+        batch = session.query(Batch).filter(Batch.id == batch_id).first()
+        if not batch:
+            return JSONResponse({"error": "Batch not found"}, status_code=404)
+
+        if batch.status == BatchStatus.DONE:
+            return JSONResponse({"error": "Cannot reschedule an already uploaded batch."}, status_code=400)
+
+        account_id = batch.account_id
+        batch_filename = str(batch.filename)
+        orig_filename = batch.original_filename
+
+        # Calculate interval delta
+        if interval_unit == "hours":
+            delta = timedelta(hours=interval_value)
+        elif interval_unit == "minutes":
+            delta = timedelta(minutes=interval_value)
+        else:
+            delta = timedelta(days=interval_value)
+
+        if not cascade:
+            # Single batch update
+            batch.scheduled_upload_at = utc_start_dt
+            session.add(ActivityLog(
+                account_id=account_id,
+                event_type="batch_rescheduled",
+                message=f"Rescheduled batch '{batch_filename}' upload to {naive_dt.strftime('%Y-%m-%d %H:%M')} {tz_str}",
+            ))
+            session.commit()
+            formatted_date = local_dt.strftime('%Y-%m-%d %H:%M %Z')
+            return {"success": True, "message": f"Successfully scheduled upload for '{batch_filename}' on {formatted_date}!"}
+        else:
+            # Cascade to all subsequent pending batches
+            query = session.query(Batch).filter(
+                Batch.account_id == account_id,
+                Batch.status == BatchStatus.PENDING,
+            )
+            if orig_filename:
+                query = query.filter(Batch.original_filename == orig_filename)
+
+            pending_batches = query.order_by(Batch.id.asc()).all()
+
+            # Find the starting index
+            start_index = 0
+            for idx, b in enumerate(pending_batches):
+                if b.id == batch_id:
+                    start_index = idx
+                    break
+
+            affected_batches = pending_batches[start_index:]
+            current_target = utc_start_dt
+            for b in affected_batches:
+                b.scheduled_upload_at = current_target
+                current_target += delta
+
+            session.add(ActivityLog(
+                account_id=account_id,
+                event_type="queue_rescheduled",
+                message=f"Cascaded upload schedule for {len(affected_batches)} batches starting {naive_dt.strftime('%Y-%m-%d %H:%M')} (every {interval_value} {interval_unit})",
+            ))
+            session.commit()
+
+            start_formatted = local_dt.strftime('%Y-%m-%d %H:%M')
+            end_local = (current_target - delta).astimezone(tz).strftime('%Y-%m-%d %H:%M')
+            return {
+                "success": True,
+                "message": f"Successfully rescheduled {len(affected_batches)} batch(es) in sequence from {start_formatted} to {end_local} ({tz_str})!",
+                "count": len(affected_batches),
+            }
+
+
+@router.post("/api/history/reschedule-group", response_class=JSONResponse)
+async def reschedule_group(data: dict = Body(...)):
+    """Reschedule all pending batches for a master campaign group in sequence."""
+    account_id = data.get("account_id")
+    orig_filename = data.get("original_filename")
+    target_dt_str = data.get("target_datetime", "").strip()
+    interval_value = int(data.get("interval_value", 2))
+    interval_unit = str(data.get("interval_unit", "days")).lower()
+
+    if not target_dt_str:
+        return JSONResponse({"error": "Target upload date and time is required."}, status_code=400)
+
+    factory = get_session_factory()
+    with factory() as session:
+        tz_str = get_setting(session, "timezone", "Africa/Lagos")
+        try:
+            tz = zoneinfo.ZoneInfo(tz_str)
+        except Exception:
+            tz = zoneinfo.ZoneInfo("Africa/Lagos")
+
+        try:
+            clean_dt_str = target_dt_str.replace("T", " ")
+            if len(clean_dt_str) == 16:
+                clean_dt_str += ":00"
+            naive_dt = datetime.strptime(clean_dt_str, "%Y-%m-%d %H:%M:%S")
+            local_dt = naive_dt.replace(tzinfo=tz)
+            utc_start_dt = local_dt.astimezone(timezone.utc)
+        except Exception as e:
+            return JSONResponse({"error": f"Invalid datetime format '{target_dt_str}': {e}"}, status_code=400)
+
+        if interval_unit == "hours":
+            delta = timedelta(hours=interval_value)
+        elif interval_unit == "minutes":
+            delta = timedelta(minutes=interval_value)
+        else:
+            delta = timedelta(days=interval_value)
+
+        query = session.query(Batch).filter(
+            Batch.account_id == account_id,
+            Batch.status == BatchStatus.PENDING,
+        )
+        if orig_filename:
+            query = query.filter(Batch.original_filename == orig_filename)
+
+        pending_batches = query.order_by(Batch.id.asc()).all()
+
+        if not pending_batches:
+            return JSONResponse({"error": "No pending batches found in this group to reschedule."}, status_code=400)
+
+        current_target = utc_start_dt
+        for b in pending_batches:
+            b.scheduled_upload_at = current_target
+            current_target += delta
+
+        session.add(ActivityLog(
+            account_id=account_id,
+            event_type="group_rescheduled",
+            message=f"Rescheduled {len(pending_batches)} batches in '{orig_filename}' starting {naive_dt.strftime('%Y-%m-%d %H:%M')} (every {interval_value} {interval_unit})",
+        ))
+        session.commit()
+
+        start_formatted = local_dt.strftime('%Y-%m-%d %H:%M')
+        end_local = (current_target - delta).astimezone(tz).strftime('%Y-%m-%d %H:%M')
+        return {
+            "success": True,
+            "message": f"Successfully rescheduled {len(pending_batches)} batch(es) in sequence from {start_formatted} to {end_local} ({tz_str})!",
+            "count": len(pending_batches),
+        }
+
 

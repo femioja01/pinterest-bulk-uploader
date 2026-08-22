@@ -216,7 +216,10 @@ def run_single_account(account_name: str, max_batches: int = 1):
         pending_batches = (
             db_session.query(Batch)
             .filter_by(account_id=account.id, status=BatchStatus.PENDING)
-            .order_by(Batch.created_at.asc())
+            .order_by(
+                Batch.scheduled_upload_at.asc().nulls_last(),
+                Batch.created_at.asc()
+            )
             .limit(max_batches)
             .all()
         )

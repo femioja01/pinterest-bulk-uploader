@@ -51,6 +51,7 @@ class Batch(Base):
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     uploaded_at = Column(DateTime, nullable=True)
+    scheduled_upload_at = Column(DateTime, nullable=True)
 
     account = relationship("Account", back_populates="batches")
 
@@ -107,6 +108,15 @@ def init_db():
             columns = [row[1] for row in result.fetchall()]
             if "schedule_cron" not in columns:
                 conn.execute(text("ALTER TABLE accounts ADD COLUMN schedule_cron VARCHAR(50)"))
+                conn.commit()
+        except Exception:
+            pass
+
+        try:
+            result_b = conn.execute(text("PRAGMA table_info(batches)"))
+            columns_b = [row[1] for row in result_b.fetchall()]
+            if "scheduled_upload_at" not in columns_b:
+                conn.execute(text("ALTER TABLE batches ADD COLUMN scheduled_upload_at DATETIME"))
                 conn.commit()
         except Exception:
             pass
