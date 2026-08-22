@@ -606,3 +606,263 @@ async def download_batch(batch_id: int):
                 return FileResponse(filepath, filename=batch_filename, media_type="text/csv")
 
     return JSONResponse({"error": "File not found on disk"}, status_code=404)
+
+
+@router.get("/api/history/{batch_id}/dates", response_class=JSONResponse)
+async def get_batch_dates(batch_id: int):
+    """Retrieve all pin rows and their current Publish Dates from a batch CSV."""
+    import csv
+    from src.services.splitter import detect_delimiter
+
+    factory = get_session_factory()
+    with factory() as session:
+        batch = session.query(Batch).filter(Batch.id == batch_id).first()
+        if not batch:
+            return JSONResponse({"error": "Batch not found"}, status_code=404)
+
+        account = session.query(Account).filter(Account.id == batch.account_id).first()
+        if not account:
+            return JSONResponse({"error": "Account not found"}, status_code=404)
+
+        account_name = str(account.name)
+        batch_filename = str(batch.filename)
+        batch_status = batch.status.value if batch.status else "unknown"
+
+    dirs = get_account_dir(account_name)
+    filepath = None
+    for subdir in ["queue", "failed", "done", "pins"]:
+        p = dirs / subdir / batch_filename
+        if p.exists():
+            filepath = p
+            break
+
+    if not filepath or not filepath.exists():
+        return JSONResponse({"error": f"Batch file '{batch_filename}' not found on disk."}, status_code=404)
+
+    delimiter = detect_delimiter(filepath)
+    rows = []
+    headers = []
+
+    try:
+        with open(filepath, "r", encoding="utf-8-sig", errors="replace") as f:
+            reader = csv.reader(f, delimiter=delimiter)
+            headers = next(reader, None)
+            if not headers:
+                return JSONResponse({"error": "CSV file is empty"}, status_code=400)
+
+            pub_idx = -1
+            title_idx = 0
+            board_idx = 2
+
+            for idx, h in enumerate(headers):
+                clean_h = h.strip().lower()
+                if clean_h in ["publish date", "publish_date", "schedule date", "date", "post date"]:
+                    pub_idx = idx
+                elif clean_h in ["title", "pin title", "headline", "name"]:
+                    title_idx = idx
+                elif clean_h in ["pinterest board", "board", "board name"]:
+                    board_idx = idx
+
+            for r_idx, row in enumerate(reader):
+                if not any(cell.strip() for cell in row):
+                    continue
+                t = row[title_idx] if title_idx < len(row) else f"Pin #{r_idx + 1}"
+                b = row[board_idx] if board_idx < len(row) else ""
+                d = row[pub_idx] if (pub_idx != -1 and pub_idx < len(row)) else ""
+                rows.append({
+                    "index": r_idx,
+                    "title": t,
+                    "board": b,
+                    "publish_date": d,
+                })
+    except Exception as e:
+        logger.error(f"Error reading CSV dates: {e}")
+        return JSONResponse({"error": f"Failed to read CSV: {str(e)}"}, status_code=500)
+
+    dates_found = [r["publish_date"] for r in rows if r["publish_date"]]
+    first_date = dates_found[0] if dates_found else ""
+    last_date = dates_found[-1] if dates_found else ""
+
+    return {
+        "success": True,
+        "batch_id": batch_id,
+        "filename": batch_filename,
+        "account_name": account_name,
+        "status": batch_status,
+        "total_pins": len(rows),
+        "first_date": first_date,
+        "last_date": last_date,
+        "rows": rows,
+    }
+
+
+@router.post("/api/history/{batch_id}/update-dates", response_class=JSONResponse)
+async def update_batch_dates(batch_id: int, data: dict = Body(...)):
+    """Update the Publish Dates and times inside a batch CSV."""
+    import csv
+    from src.services.splitter import detect_delimiter
+
+    factory = get_session_factory()
+    with factory() as session:
+        batch = session.query(Batch).filter(Batch.id == batch_id).first()
+        if not batch:
+            return JSONResponse({"error": "Batch not found"}, status_code=404)
+
+        if batch.status == BatchStatus.DONE:
+            return JSONResponse({"error": "Cannot edit dates of already completed/uploaded batch."}, status_code=400)
+
+        account = session.query(Account).filter(Account.id == batch.account_id).first()
+        if not account:
+            return JSONResponse({"error": "Account not found"}, status_code=404)
+
+        account_name = str(account.name)
+        batch_filename = str(batch.filename)
+        account_id = account.id
+
+    dirs = get_account_dir(account_name)
+    filepath = None
+    for subdir in ["queue", "failed", "pins"]:
+        p = dirs / subdir / batch_filename
+        if p.exists():
+            filepath = p
+            break
+
+    if not filepath or not filepath.exists():
+        return JSONResponse({"error": f"Batch file '{batch_filename}' not found on disk."}, status_code=404)
+
+    mode = data.get("mode", "auto")  # "auto", "shift", or "custom"
+    new_dates = []
+
+    delimiter = detect_delimiter(filepath)
+    with open(filepath, "r", encoding="utf-8-sig", errors="replace") as f:
+        csv_data = list(csv.reader(f, delimiter=delimiter))
+
+    if not csv_data:
+        return JSONResponse({"error": "Batch CSV is empty"}, status_code=400)
+
+    headers = csv_data[0]
+    data_rows = csv_data[1:]
+    total_pins = len(data_rows)
+
+    if total_pins == 0:
+        return JSONResponse({"error": "Batch CSV has no pin data rows"}, status_code=400)
+
+    pub_idx = -1
+    for idx, h in enumerate(headers):
+        clean_h = h.strip().lower()
+        if clean_h in ["publish date", "publish_date", "schedule date", "date", "post date"]:
+            pub_idx = idx
+            break
+
+    if mode == "auto":
+        # Auto schedule mode: start datetime + interval in minutes + daily window
+        start_str = data.get("start_datetime", "").strip()
+        interval_mins = int(data.get("interval_minutes", 120))
+        daily_start = data.get("daily_start", "09:00").strip()
+        daily_end = data.get("daily_end", "21:00").strip()
+
+        if not start_str:
+            return JSONResponse({"error": "Start date & time is required for auto-schedule mode."}, status_code=400)
+
+        try:
+            # Parse start_datetime (e.g. 2026-08-25T09:00 or 2026-08-25 09:00)
+            clean_start = start_str.replace("T", " ")
+            if len(clean_start) == 16:
+                clean_start += ":00"
+            current_dt = datetime.strptime(clean_start, "%Y-%m-%d %H:%M:%S")
+        except Exception as e:
+            return JSONResponse({"error": f"Invalid start date format '{start_str}': {e}"}, status_code=400)
+
+        # Parse daily window hours/mins
+        try:
+            d_start_h, d_start_m = map(int, daily_start.split(":"))
+            d_end_h, d_end_m = map(int, daily_end.split(":"))
+        except Exception:
+            d_start_h, d_start_m = 9, 0
+            d_end_h, d_end_m = 21, 0
+
+        for _ in range(total_pins):
+            # Check if current_dt is past daily_end, if so roll to next day at daily_start
+            window_end_today = current_dt.replace(hour=d_end_h, minute=d_end_m, second=0)
+            if current_dt > window_end_today and interval_mins < 1440:
+                # Roll to next day
+                current_dt = (current_dt + timedelta(days=1)).replace(hour=d_start_h, minute=d_start_m, second=0)
+
+            new_dates.append(current_dt.strftime("%Y-%m-%dT%H:%M:%S"))
+            current_dt += timedelta(minutes=interval_mins)
+
+    elif mode == "shift":
+        # Shift mode: shift all existing dates by days/hours
+        shift_days = int(data.get("shift_days", 0))
+        shift_hours = int(data.get("shift_hours", 0))
+        shift_delta = timedelta(days=shift_days, hours=shift_hours)
+
+        for r_idx, row in enumerate(data_rows):
+            existing_d = row[pub_idx] if (pub_idx != -1 and pub_idx < len(row)) else ""
+            if existing_d:
+                try:
+                    clean_d = existing_d.replace("T", " ").strip()
+                    if len(clean_d) == 10:
+                        parsed_dt = datetime.strptime(clean_d, "%Y-%m-%d")
+                    elif len(clean_d) == 16:
+                        parsed_dt = datetime.strptime(clean_d, "%Y-%m-%d %H:%M")
+                    else:
+                        parsed_dt = datetime.strptime(clean_d[:19], "%Y-%m-%d %H:%M:%S")
+                    new_dt = parsed_dt + shift_delta
+                    new_dates.append(new_dt.strftime("%Y-%m-%dT%H:%M:%S"))
+                except Exception:
+                    new_dates.append(existing_d)
+            else:
+                new_dates.append("")
+
+    elif mode == "custom":
+        # Custom mode: array of dates provided per row
+        custom_list = data.get("dates", [])
+        if not custom_list or len(custom_list) != total_pins:
+            return JSONResponse({"error": f"Provided {len(custom_list)} dates, but batch contains {total_pins} pins."}, status_code=400)
+        for d_str in custom_list:
+            clean_val = d_str.strip().replace(" ", "T")
+            if clean_val and len(clean_val) == 16:
+                clean_val += ":00"
+            new_dates.append(clean_val)
+    else:
+        return JSONResponse({"error": f"Unknown mode '{mode}'"}, status_code=400)
+
+    # Rewrite CSV file
+    if pub_idx == -1:
+        headers.append("Publish Date")
+        pub_idx = len(headers) - 1
+
+    updated_file_rows = [headers]
+    for idx, row in enumerate(data_rows):
+        while len(row) < len(headers):
+            row.append("")
+        if idx < len(new_dates) and new_dates[idx]:
+            row[pub_idx] = new_dates[idx]
+        updated_file_rows.append(row)
+
+    try:
+        with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(updated_file_rows)
+    except Exception as e:
+        logger.error(f"Failed to write updated CSV: {e}")
+        return JSONResponse({"error": f"Failed to save CSV file: {str(e)}"}, status_code=500)
+
+    with factory() as session:
+        session.add(ActivityLog(
+            account_id=account_id,
+            event_type="dates_updated",
+            message=f"Updated publish dates for {total_pins} pins in '{batch_filename}'",
+        ))
+        session.commit()
+
+    date_sample = f"From {new_dates[0][:16].replace('T', ' ')} to {new_dates[-1][:16].replace('T', ' ')}" if new_dates and new_dates[0] else ""
+
+    return {
+        "success": True,
+        "message": f"Successfully updated Publish Dates for {total_pins} pins in {batch_filename}! {date_sample}",
+        "first_date": new_dates[0] if new_dates else "",
+        "last_date": new_dates[-1] if new_dates else "",
+    }
+
