@@ -511,7 +511,15 @@
     function openDateModal(batchId) {
         activeBatchId = batchId;
         const modal = document.getElementById('modal-dates');
-        modal.style.display = 'flex';
+        if (!modal) {
+            console.error('Modal element #modal-dates not found in DOM');
+            return;
+        }
+
+        modal.classList.add('active');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
 
         document.getElementById('modal-date-subtitle').textContent = 'Loading batch CSV dates...';
         document.getElementById('modal-current-range').textContent = 'Fetching dates...';
@@ -548,16 +556,35 @@
                 renderManualTable(data.rows);
             })
             .catch(err => {
+                console.error('Fetch error for batch dates:', err);
                 showToast('Error loading batch dates', 'error');
                 closeDateModal();
             });
     }
 
     function closeDateModal() {
-        document.getElementById('modal-dates').style.display = 'none';
+        const modal = document.getElementById('modal-dates');
+        if (modal) {
+            modal.classList.remove('active');
+            modal.style.setProperty('display', 'none', 'important');
+            modal.style.setProperty('opacity', '0', 'important');
+            modal.style.setProperty('visibility', 'hidden', 'important');
+        }
         activeBatchId = null;
         activeBatchData = null;
     }
+
+    window.addEventListener('DOMContentLoaded', () => {
+        const modal = document.getElementById('modal-dates');
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeDateModal();
+            });
+        }
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeDateModal();
+        });
+    });
 
     function switchDateTab(tab) {
         activeDateTab = tab;
