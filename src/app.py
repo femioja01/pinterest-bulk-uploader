@@ -82,6 +82,7 @@ from src.routes.accounts import router as accounts_router
 from src.routes.upload import router as upload_router
 from src.routes.history import router as history_router
 from src.routes.schedule import router as schedule_router
+from src.routes.generator import router as generator_router
 from src.routes.settings import router as settings_router
 
 app.include_router(dashboard_router)
@@ -89,4 +90,6 @@ app.include_router(accounts_router)
 app.include_router(upload_router)
 app.include_router(history_router)
 app.include_router(schedule_router)
+app.include_router(generator_router)
 app.include_router(settings_router)
+

@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+{% set active_page = 'generator' %}
+
+{% block content %}
+<div class="page-header d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px;">
+    <div>
+        <h1 style="margin-bottom: 4px;">🗓️ Schedule Generator</h1>
+        <p class="text-muted" style="margin: 0; font-size: 0.9rem;">
+            Generate evenly-spaced publish dates and timestamps formatted for Pinterest Bulk CSV uploads.
+        </p>
+    </div>
+</div>
+
+<div class="generator-grid" style="display: grid; grid-template-columns: minmax(340px, 420px) 1fr; gap: 24px; align-items: start;">
+    
+    <!-- LEFT COLUMN: INPUT CONTROLS -->
+    <div class="card" style="box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid var(--border-color);">
+        <div class="card-header" style="padding: 18px 22px; border-bottom: 1px solid var(--border-color); background: #f8fafc;">
+            <h3 style="margin: 0; font-size: 1.05rem; color: var(--text-dark); display: flex; align-items: center; gap: 8px;">
+                ⚙️ Generation Settings
+            </h3>
+        </div>
+        <div class="card-body" style="padding: 22px;">
+            <form id="schedule-form" onsubmit="event.preventDefault(); generateDates();">
+                
+                <!-- 1. Start Date -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="start_date" style="display: flex; justify-between; align-center; margin-bottom: 6px;">
+                        <strong>Start Date:</strong>
+                    </label>
+                    <input type="date" id="start_date" class="form-input" value="{{ default_start_date }}" required style="width: 100%; font-size: 0.95rem; padding: 10px 12px;">
+                    
+                    <!-- Quick Date Presets -->
+                    <div class="d-flex gap-1" style="margin-top: 8px; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setDatePreset(0)">Today</button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setDatePreset(1)">Tomorrow</button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setDatePresetNextMonday()">Next Monday</button>
+                    </div>
+                </div>
+
+                <!-- 2. Quantity per Day -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="qty_per_day" style="margin-bottom: 6px; display: block;">
+                        <strong>Quantity per Day (max 1000):</strong>
+                    </label>
+                    <input type="number" id="qty_per_day" class="form-input" value="25" min="1" max="1000" required style="width: 100%; font-size: 0.95rem; padding: 10px 12px;" oninput="onInputsChanged()">
+                    
+                    <!-- Quick Qty Presets -->
+                    <div class="d-flex gap-1" style="margin-top: 8px; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setQtyPerDay(10)">10/day</button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setQtyPerDay(25)">25/day</button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setQtyPerDay(50)">50/day</button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setQtyPerDay(100)">100/day</button>
+                    </div>
+                </div>
+
+                <!-- 3. Total Quantity -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="total_qty" style="margin-bottom: 6px; display: block;">
+                        <strong>Total Quantity:</strong>
+                    </label>
+                    <input type="number" id="total_qty" class="form-input" value="175" min="1" max="10000" required style="width: 100%; font-size: 0.95rem; padding: 10px 12px;" oninput="onInputsChanged()">
+                    
+                    <!-- Quick Total Presets -->
+                    <div class="d-flex gap-1" style="margin-top: 8px; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setTotalQty(50)">50</button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setTotalQty(100)">100</button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setTotalQty(175)">175</button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setTotalQty(250)">250</button>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" onclick="setTotalQty(500)">500</button>
+                    </div>
+                </div>
+
+                <!-- 4. Active Daily Time Window (Collapsible) -->
+                <div style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+                    <div class="d-flex justify-between align-center" style="cursor: pointer;" onclick="toggleTimeWindow()">
+                        <strong style="font-size: 0.88rem; color: var(--text-dark);">🕒 Daily Active Window:</strong>
+                        <span id="btn-toggle-time" style="font-size: 0.8rem; color: var(--primary);">▼ Customize (08:00 - 22:00)</span>
+                    </div>
+                    
+                    <div id="time-window-details" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                        <div class="d-flex gap-2" style="margin-bottom: 8px;">
+                            <div style="flex: 1;">
+                                <label for="daily_start" style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 4px;">First Pin Time</label>
+                                <input type="time" id="daily_start" class="form-input" value="08:00" style="padding: 6px 10px; font-size: 0.88rem;" onchange="generateDates()">
+                            </div>
+                            <div style="flex: 1;">
+                                <label for="daily_end" style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Last Pin Time</label>
+                                <input type="time" id="daily_end" class="form-input" value="22:00" style="padding: 6px 10px; font-size: 0.88rem;" onchange="generateDates()">
+                            </div>
+                        </div>
+                        <p class="text-muted" style="font-size: 0.75rem; margin: 0;">Pins will be spaced evenly between these hours each day.</p>
+                    </div>
+                </div>
+
+                <!-- 5. Output Format Selector -->
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label style="margin-bottom: 8px; display: block;"><strong>Output Format:</strong></label>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <!-- ISO Format -->
+                        <label style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #ffffff; cursor: pointer; transition: all 0.15s;" id="label-fmt-iso">
+                            <input type="radio" name="format_choice" value="iso" checked onchange="onFormatChanged('iso')">
+                            <div>
+                                <strong style="font-size: 0.88rem; color: var(--text-dark);">Pinterest ISO-8601</strong>
+                                <span class="status-badge badge-success" style="font-size: 0.68rem; padding: 1px 6px; margin-left: 6px;">Recommended</span>
+                                <div style="font-family: monospace; font-size: 0.78rem; color: var(--primary); margin-top: 2px;">2026-08-25T08:00:00</div>
+                            </div>
+                        </label>
+
+                        <!-- Standard Format -->
+                        <label style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #ffffff; cursor: pointer; transition: all 0.15s;" id="label-fmt-standard">
+                            <input type="radio" name="format_choice" value="standard" onchange="onFormatChanged('standard')">
+                            <div>
+                                <strong style="font-size: 0.88rem; color: var(--text-dark);">Standard DateTime</strong>
+                                <div style="font-family: monospace; font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">2026-08-25 08:00:00</div>
+                            </div>
+                        </label>
+
+                        <!-- Date Only -->
+                        <label style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #ffffff; cursor: pointer; transition: all 0.15s;" id="label-fmt-date_only">
+                            <input type="radio" name="format_choice" value="date_only" onchange="onFormatChanged('date_only')">
+                            <div>
+                                <strong style="font-size: 0.88rem; color: var(--text-dark);">Date Only</strong>
+                                <div style="font-family: monospace; font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">2026-08-25</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Generate Button -->
+                <button type="submit" class="btn btn-primary btn-block" style="padding: 12px; font-size: 1rem; font-weight: 600; width: 100%; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(59,130,246,0.3);">
+                    ⚡ Generate Dates
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- RIGHT COLUMN: OUTPUT & EXPORT -->
+    <div class="card" style="box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid var(--border-color); display: flex; flex-direction: column; height: 100%;">
+        
+        <!-- Summary Stats Banner -->
+        <div style="padding: 16px 22px; background: #f8fafc; border-bottom: 1px solid var(--border-color);" class="d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px;">
+            <div>
+                <h3 style="margin: 0; font-size: 1.05rem; color: var(--text-dark);">📋 Generated Timestamps</h3>
+                <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 2px;" id="summary-text">
+                    175 dates across 7 days
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="d-flex gap-2 align-center">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="downloadOutput('txt')" title="Download as text file">
+                    ⬇️ .TXT
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="downloadOutput('csv')" title="Download as CSV column">
+                    ⬇️ .CSV
+                </button>
+                <button type="button" class="btn btn-primary" id="btn-copy-main" onclick="copyGeneratedDates()" style="font-weight: 600; padding: 8px 18px;">
+                    📋 Copy All to Clipboard
+                </button>
+            </div>
+        </div>
+
+        <!-- Quick Summary Metrics Bar -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--border-color); border-bottom: 1px solid var(--border-color);">
+            <div style="background: #ffffff; padding: 10px 16px;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Total Dates</div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: var(--primary);" id="stat-total-dates">175</div>
+            </div>
+            <div style="background: #ffffff; padding: 10px 16px;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Days Span</div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-dark);" id="stat-days-span">7 Days</div>
+            </div>
+            <div style="background: #ffffff; padding: 10px 16px;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Pin Spacing</div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: var(--success);" id="stat-spacing">~35 mins</div>
+            </div>
+            <div style="background: #ffffff; padding: 10px 16px;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Daily Schedule</div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-dark);" id="stat-daily-schedule">25 / day</div>
+            </div>
+        </div>
+
+        <!-- Output Textarea with Line Numbers -->
+        <div class="card-body" style="padding: 16px; flex: 1; display: flex; flex-direction: column;">
+            <div style="position: relative; flex: 1; min-height: 420px; display: flex;">
+                <textarea id="output-textarea" readonly style="width: 100%; min-height: 420px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.88rem; line-height: 1.6; padding: 14px 16px; border: 1px solid var(--border-color); border-radius: 8px; background: #fafafa; color: #0f172a; resize: vertical; white-space: pre;" onclick="this.select();"></textarea>
+            </div>
+            <div class="d-flex justify-between align-center" style="margin-top: 8px; font-size: 0.78rem; color: var(--text-muted);">
+                <span>💡 Click inside box to select all, or click <strong>Copy All to Clipboard</strong> above.</span>
+                <span id="line-counter">175 lines</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentDatesRaw = []; // Stores date objects
+    let currentFormat = 'iso';
+
+    // Initialize on page load
+    window.addEventListener('DOMContentLoaded', () => {
+        generateDates();
+    });
+
+    function setDatePreset(daysFromToday) {
+        const d = new Date();
+        d.setDate(d.getDate() + daysFromToday);
+        document.getElementById('start_date').value = d.toISOString().substring(0, 10);
+        generateDates();
+    }
+
+    function setDatePresetNextMonday() {
+        const d = new Date();
+        const day = d.getDay();
+        const diff = d.getDate() + ((7 - day + 1) % 7 || 7);
+        d.setDate(diff);
+        document.getElementById('start_date').value = d.toISOString().substring(0, 10);
+        generateDates();
+    }
+
+    function setQtyPerDay(qty) {
+        document.getElementById('qty_per_day').value = qty;
+        generateDates();
+    }
+
+    function setTotalQty(total) {
+        document.getElementById('total_qty').value = total;
+        generateDates();
+    }
+
+    function onInputsChanged() {
+        generateDates();
+    }
+
+    function toggleTimeWindow() {
+        const details = document.getElementById('time-window-details');
+        const btn = document.getElementById('btn-toggle-time');
+        if (details.style.display === 'none' || !details.style.display) {
+            details.style.display = 'block';
+            btn.textContent = '▲ Close Window';
+        } else {
+            details.style.display = 'none';
+            btn.textContent = '▼ Customize (08:00 - 22:00)';
+        }
+    }
+
+    function onFormatChanged(fmt) {
+        currentFormat = fmt;
+        renderDatesOutput();
+    }
+
+    function generateDates() {
+        const startDateStr = document.getElementById('start_date').value;
+        const qtyPerDay = parseInt(document.getElementById('qty_per_day').value) || 25;
+        const totalQty = parseInt(document.getElementById('total_qty').value) || 175;
+        const dailyStart = document.getElementById('daily_start').value || '08:00';
+        const dailyEnd = document.getElementById('daily_end').value || '22:00';
+
+        if (!startDateStr || qtyPerDay <= 0 || totalQty <= 0) return;
+
+        const [sYear, sMonth, sDay] = startDateStr.split('-').map(Number);
+        const [startH, startM] = dailyStart.split(':').map(Number);
+        const [endH, endM] = dailyEnd.split(':').map(Number);
+
+        let startSeconds = startH * 3600 + startM * 60;
+        let endSeconds = endH * 3600 + endM * 60;
+        if (endSeconds <= startSeconds) {
+            endSeconds = startSeconds + 14 * 3600;
+        }
+
+        const windowDuration = endSeconds - startSeconds;
+        let currentDay = new Date(sYear, sMonth - 1, sDay);
+        let pinsGenerated = 0;
+        currentDatesRaw = [];
+
+        while (pinsGenerated < totalQty) {
+            const todayPins = Math.min(qtyPerDay, totalQty - pinsGenerated);
+            const stepSeconds = todayPins > 1 ? windowDuration / (todayPins - 1) : 0;
+
+            for (let i = 0; i < todayPins; i++) {
+                const secOffset = Math.floor(startSeconds + i * stepSeconds);
+                const h = Math.floor(secOffset / 3600) % 24;
+                const m = Math.floor((secOffset % 3600) / 60);
+                const s = secOffset % 60;
+
+                const dt = new Date(currentDay.getFullYear(), currentDay.getMonth(), currentDay.getDate(), h, m, s);
+                currentDatesRaw.push(dt);
+                pinsGenerated++;
+            }
+
+            currentDay.setDate(currentDay.getDate() + 1);
+        }
+
+        // Calculate summary metrics
+        const totalDays = Math.ceil(totalQty / qtyPerDay);
+        const avgSpacingMins = qtyPerDay > 1 ? Math.round((windowDuration / (qtyPerDay - 1)) / 60) : windowDuration / 60;
+
+        document.getElementById('stat-total-dates').textContent = totalQty;
+        document.getElementById('stat-days-span').textContent = `${totalDays} Day${totalDays > 1 ? 's' : ''}`;
+        document.getElementById('stat-spacing').textContent = `~${avgSpacingMins} mins`;
+        document.getElementById('stat-daily-schedule').textContent = `${qtyPerDay} / day`;
+
+        const firstDt = currentDatesRaw[0];
+        const lastDt = currentDatesRaw[currentDatesRaw.length - 1];
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        
+        if (firstDt && lastDt) {
+            document.getElementById('summary-text').textContent = 
+                `${totalQty} dates spanning ${totalDays} day${totalDays > 1 ? 's' : ''} (${monthNames[firstDt.getMonth()]} ${firstDt.getDate()}, ${firstDt.getFullYear()} → ${monthNames[lastDt.getMonth()]} ${lastDt.getDate()}, ${lastDt.getFullYear()})`;
+        }
+
+        renderDatesOutput();
+    }
+
+    function renderDatesOutput() {
+        const formattedLines = currentDatesRaw.map(dt => {
+            const pad = (n) => String(n).padStart(2, '0');
+            const year = dt.getFullYear();
+            const month = pad(dt.getMonth() + 1);
+            const day = pad(dt.getDate());
+            const hours = pad(dt.getHours());
+            const mins = pad(dt.getMinutes());
+            const secs = pad(dt.getSeconds());
+
+            if (currentFormat === 'iso') {
+                return `${year}-${month}-${day}T${hours}:${mins}:${secs}`;
+            } else if (currentFormat === 'standard') {
+                return `${year}-${month}-${day} ${hours}:${mins}:${secs}`;
+            } else if (currentFormat === 'date_only') {
+                return `${year}-${month}-${day}`;
+            }
+            return `${year}-${month}-${day}T${hours}:${mins}:${secs}`;
+        });
+
+        const outputText = formattedLines.join('\n');
+        document.getElementById('output-textarea').value = outputText;
+        document.getElementById('line-counter').textContent = `${formattedLines.length} lines`;
+    }
+
+    function copyGeneratedDates() {
+        const textarea = document.getElementById('output-textarea');
+        if (!textarea.value) {
+            showToast('No dates to copy', 'error');
+            return;
+        }
+
+        navigator.clipboard.writeText(textarea.value)
+            .then(() => {
+                const btn = document.getElementById('btn-copy-main');
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = `✓ Copied ${currentDatesRaw.length} Dates!`;
+                btn.style.backgroundColor = '#16a34a';
+                btn.style.borderColor = '#16a34a';
+
+                showToast(`✓ Copied ${currentDatesRaw.length} timestamps to clipboard!`, 'success');
+
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.style.backgroundColor = '';
+                    btn.style.borderColor = '';
+                }, 2000);
+            })
+            .catch(() => {
+                textarea.select();
+                document.execCommand('copy');
+                showToast(`✓ Copied ${currentDatesRaw.length} timestamps to clipboard!`, 'success');
+            });
+    }
+
+    function downloadOutput(type) {
+        const textarea = document.getElementById('output-textarea');
+        if (!textarea.value) return;
+
+        let content = textarea.value;
+        let filename = `pinterest_schedule_${currentDatesRaw.length}_pins.${type}`;
+        let mimeType = 'text/plain';
+
+        if (type === 'csv') {
+            content = 'Publish Date\n' + content;
+            mimeType = 'text/csv';
+        }
+
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showToast(`Downloaded ${filename}!`, 'success');
+    }
+</script>
+{% endblock %}
