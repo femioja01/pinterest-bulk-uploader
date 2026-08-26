@@ -14,9 +14,9 @@
 <!-- Explanatory Guide Card -->
 <div class="card" style="background: rgba(59, 130, 246, 0.04); border-left: 4px solid var(--primary); margin-bottom: 20px;">
     <div class="card-body" style="padding: 16px 20px;">
-        <h4 style="font-size: 0.95rem; margin-bottom: 6px; color: var(--primary);">📂 Master Campaign Progress & Queue Controls</h4>
+        <h4 style="font-size: 0.95rem; margin-bottom: 6px; color: var(--primary);">📂 Campaign Management & Auto-Archive</h4>
         <div style="font-size: 0.84rem; color: var(--text-dark); line-height: 1.5;">
-            Manage and monitor your automated pin drip. Click <strong>⏱️ Reschedule</strong> on any queued batch to adjust when it will upload (individually or cascading all subsequent batches). Click <strong>🚀 Upload Now</strong> to upload immediately to Pinterest.
+            Active campaigns appear in <strong>⚡ Active Queue</strong>. Once all batches in a master campaign reach <strong>100% completion</strong>, they are automatically organized into <strong>📦 Completed Archive</strong> to keep your active workspace clutter-free.
         </div>
     </div>
 </div>
@@ -47,23 +47,26 @@
                 {% endif %}
             </div>
 
-            <!-- View Mode Toggler -->
+            <!-- Smart View Mode / Tab Toggler -->
             <div class="d-flex gap-1" style="background: #f1f5f9; padding: 4px; border-radius: 8px;">
-                <button type="button" class="btn btn-sm {% if view_mode == 'grouped' %}btn-primary{% else %}btn-secondary{% endif %}" onclick="switchViewMode('grouped')" style="border: none; padding: 6px 14px;">
-                    📂 Master Groups
+                <button type="button" class="btn btn-sm {% if view_mode == 'active' %}btn-primary{% else %}btn-secondary{% endif %}" onclick="switchViewMode('active')" style="border: none; padding: 6px 14px; font-weight: 600;">
+                    ⚡ Active Queue ({{ active_count }})
                 </button>
-                <button type="button" class="btn btn-sm {% if view_mode == 'flat' %}btn-primary{% else %}btn-secondary{% endif %}" onclick="switchViewMode('flat')" style="border: none; padding: 6px 14px;">
-                    📋 All Batches
+                <button type="button" class="btn btn-sm {% if view_mode == 'archived' %}btn-primary{% else %}btn-secondary{% endif %}" onclick="switchViewMode('archived')" style="border: none; padding: 6px 14px; font-weight: 600;">
+                    📦 Completed Archive ({{ archived_count }})
+                </button>
+                <button type="button" class="btn btn-sm {% if view_mode == 'flat' %}btn-primary{% else %}btn-secondary{% endif %}" onclick="switchViewMode('flat')" style="border: none; padding: 6px 14px; font-weight: 600;">
+                    📋 All Batches ({{ total_batches_count }})
                 </button>
             </div>
         </form>
     </div>
 </div>
 
-{% if view_mode == 'grouped' %}
-<!-- MASTER CAMPAIGN GROUPED VIEW -->
+{% if view_mode == 'active' %}
+<!-- TAB 1: ACTIVE MASTER CAMPAIGNS -->
 <div class="master-groups-container">
-    {% for group in master_groups %}
+    {% for group in active_groups %}
     <div class="card" style="margin-bottom: 20px; border: 1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
         <!-- Master Card Header -->
         <div class="card-body" style="padding: 20px 24px; cursor: pointer;" onclick="toggleGroupDetails('{{ group.group_id }}')">
@@ -255,16 +258,106 @@
     </div>
     {% else %}
     <div class="card">
-        <div class="empty-state" style="padding: 40px 20px;">
-            <span class="icon" style="font-size: 3rem;">📂</span>
-            <p>No master CSV uploads found. Upload a CSV from the <a href="/upload">Upload CSV</a> tab to begin.</p>
+        <div class="empty-state" style="padding: 48px 20px; text-align: center;">
+            <span class="icon" style="font-size: 3.2rem; display: block; margin-bottom: 12px;">⚡</span>
+            <h3 style="margin-bottom: 6px; color: var(--text-dark);">No Active Campaigns in Queue</h3>
+            <p class="text-muted" style="max-width: 480px; margin: 0 auto 16px;">
+                All queued batches have finished uploading! You can view past completed uploads in the <strong>Completed Archive</strong> or upload a fresh Master CSV.
+            </p>
+            <div class="d-flex gap-2 justify-center">
+                <button class="btn btn-secondary" onclick="switchViewMode('archived')">📦 Open Completed Archive ({{ archived_count }})</button>
+                <a href="/upload" class="btn btn-primary">📤 Upload Master CSV</a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% elif view_mode == 'archived' %}
+<!-- TAB 2: COMPLETED & ARCHIVED MASTER CAMPAIGNS -->
+<div class="master-groups-container">
+    {% for group in archived_groups %}
+    <div class="card" style="margin-bottom: 20px; border: 1px solid var(--border-color); border-left: 4px solid var(--success); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+        <!-- Master Card Header -->
+        <div class="card-body" style="padding: 20px 24px; cursor: pointer;" onclick="toggleGroupDetails('{{ group.group_id }}')">
+            <div class="d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px;">
+                <div>
+                    <span class="status-badge badge-success" style="font-weight: 600; font-size: 0.8rem; margin-right: 8px;">
+                        ✅ 100% Completed
+                    </span>
+                    <strong style="font-size: 1.05rem; color: var(--text-dark);">
+                        {{ group.original_filename }}
+                    </strong>
+                    <span class="text-muted" style="font-size: 0.82rem; margin-left: 8px;">
+                        • Account: <strong>{{ group.account_name }}</strong> • Uploaded: {{ group.created_at }}
+                    </span>
+                </div>
+
+                <div class="d-flex gap-2 align-center">
+                    <span class="text-muted" style="font-size: 0.85rem; font-weight: 600;">
+                        {{ group.total_pins }} pins across {{ group.total_batches }} batches
+                    </span>
+                    <button class="btn btn-secondary btn-sm" id="btn-toggle-{{ group.group_id }}" style="font-size: 0.8rem;" onclick="event.stopPropagation(); toggleGroupDetails('{{ group.group_id }}')">
+                        ▼ View Batches ({{ group.total_batches }})
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Collapsible Batch Table Details -->
+        <div id="details-{{ group.group_id }}" style="display: none; border-top: 1px solid var(--border-color); background: #fafafa;">
+            <div class="table-container" style="padding: 0;">
+                <table class="data-table" style="margin: 0; background: transparent;">
+                    <thead>
+                        <tr style="background: #f1f5f9;">
+                            <th style="padding-left: 24px;">Batch File</th>
+                            <th>Pins</th>
+                            <th>Status</th>
+                            <th>Upload Completed Time</th>
+                            <th style="padding-right: 24px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for batch in group.batches %}
+                        <tr style="border-bottom: 1px solid var(--border-color);">
+                            <td style="padding-left: 24px;">
+                                <code>{{ batch.filename }}</code>
+                            </td>
+                            <td><strong>{{ batch.pin_count }}</strong> pins</td>
+                            <td>
+                                <span class="status-badge badge-success">Done</span>
+                            </td>
+                            <td>
+                                <div style="font-size: 0.85rem; color: var(--success); font-weight: 600;">
+                                    ✅ {{ batch.uploaded_at if batch.uploaded_at else 'Uploaded' }}
+                                </div>
+                            </td>
+                            <td style="padding-right: 24px;">
+                                <a href="/api/history/{{ batch.id }}/download" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();" title="Download this split batch CSV">Download CSV</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="card">
+        <div class="empty-state" style="padding: 48px 20px; text-align: center;">
+            <span class="icon" style="font-size: 3.2rem; display: block; margin-bottom: 12px;">📦</span>
+            <h3 style="margin-bottom: 6px; color: var(--text-dark);">No Completed Campaigns in Archive</h3>
+            <p class="text-muted" style="max-width: 480px; margin: 0 auto 16px;">
+                As your active campaigns finish uploading all their batches to Pinterest, they will automatically be archived here for your records.
+            </p>
+            <button class="btn btn-primary" onclick="switchViewMode('active')">⚡ View Active Queue</button>
         </div>
     </div>
     {% endfor %}
 </div>
 
 {% else %}
-<!-- FLAT ALL BATCHES TABLE VIEW -->
+<!-- TAB 3: FLAT ALL BATCHES TABLE VIEW -->
 <div class="card">
     <div class="table-container">
         <table class="data-table">

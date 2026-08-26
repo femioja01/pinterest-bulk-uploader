@@ -181,9 +181,13 @@ async def history_page(
     request: Request,
     account_id: int = Query(0),
     status: str = Query(""),
-    view_mode: str = Query("grouped"),
+    view_mode: str = Query("active"),
     page: int = Query(1),
 ):
+    # Normalize old 'grouped' mode to 'active'
+    if view_mode == "grouped":
+        view_mode = "active"
+
     per_page = 25
     factory = get_session_factory()
     with factory() as session:
@@ -244,7 +248,9 @@ async def history_page(
             key = (b.account_id, b.original_filename or "Bulk Upload", created_minute)
             groups_dict[key].append(b)
 
-        master_groups = []
+        active_groups = []
+        archived_groups = []
+
         for idx, ((acct_id, orig_name, created_str), b_list) in enumerate(groups_dict.items()):
             total_batches = len(b_list)
             total_pins = sum(b.pin_count for b in b_list)
@@ -277,7 +283,7 @@ async def history_page(
                     "raw_scheduled_time": raw_sched,
                 })
 
-            master_groups.append({
+            group_data = {
                 "group_id": f"group_{idx}_{acct_id}",
                 "account_id": acct_id,
                 "account_name": account_name_map.get(acct_id, "Unknown"),
@@ -293,7 +299,13 @@ async def history_page(
                 "pct_done": pct_done,
                 "first_pending_id": first_pending_id,
                 "batches": b_details,
-            })
+            }
+
+            # If 100% done and no pending/processing slices left, place in archive
+            if pct_done == 100 and pending_count == 0 and processing_count == 0:
+                archived_groups.append(group_data)
+            else:
+                active_groups.append(group_data)
 
     return templates.TemplateResponse(
         request,
@@ -301,7 +313,11 @@ async def history_page(
         {
             "active_page": "history",
             "batches": batch_list,
-            "master_groups": master_groups,
+            "active_groups": active_groups,
+            "archived_groups": archived_groups,
+            "active_count": len(active_groups),
+            "archived_count": len(archived_groups),
+            "total_batches_count": total,
             "accounts": account_list,
             "filter_account_id": account_id,
             "filter_status": status,
