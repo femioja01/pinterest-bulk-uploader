@@ -60,6 +60,12 @@ class SimpleScheduler:
                     global_cron = get_setting(session, "upload_schedule", "0 9 */2 * *")
                     accounts = session.query(Account).filter_by(enabled=True).all()
 
+                    # Check due batches with custom scheduled_upload_at
+                    try:
+                        check_and_run_due_batches()
+                    except Exception as e:
+                        logger.error(f"Error in SimpleScheduler due-batches worker: {e}")
+
                     for acct in accounts:
                         cron_expr = (acct.schedule_cron or "").strip() or global_cron
                         if self._matches_cron(now, cron_expr):
@@ -159,17 +165,152 @@ def sync_account_schedules(scheduler):
                 logger.error(f"Failed to schedule job for '{account.name}' ({cron_expr}): {e}")
 
 
+import shutil
+
+_upload_lock = threading.Lock()
+
+
+def check_and_run_due_batches():
+    """High-frequency queue worker (runs every 60s) to automatically upload any batches whose scheduled_upload_at <= now."""
+    if not _upload_lock.acquire(blocking=False):
+        return
+
+    try:
+        session_factory = get_session_factory()
+        with session_factory() as db_session:
+            now_utc = datetime.now(timezone.utc)
+            due_batches = (
+                db_session.query(Batch)
+                .join(Account, Batch.account_id == Account.id)
+                .filter(
+                    Account.enabled == True,
+                    Batch.status == BatchStatus.PENDING,
+                    Batch.scheduled_upload_at != None,
+                    Batch.scheduled_upload_at <= now_utc,
+                )
+                .order_by(Batch.scheduled_upload_at.asc())
+                .all()
+            )
+
+            if not due_batches:
+                return
+
+            logger.info(f"Dynamic Queue Worker: Found {len(due_batches)} due batch(es) to upload to Pinterest.")
+
+            for batch in due_batches:
+                account = db_session.query(Account).filter_by(id=batch.account_id).first()
+                if not account or not account.enabled:
+                    continue
+
+                batch_filename = str(batch.filename)
+                logger.info(f"Dynamic Worker: Starting due upload for batch '{batch_filename}' ({account.name}). Target: {batch.scheduled_upload_at} UTC")
+
+                if not check_session(account.name, account.proxy_url):
+                    account.session_valid = False
+                    db_session.commit()
+                    asyncio.run(notify_session_expired(account.name))
+                    continue
+
+                account.session_valid = True
+                batch.status = BatchStatus.PROCESSING
+                db_session.commit()
+
+                dirs = ensure_account_dirs(account.name)
+                batch_file = dirs["queue"] / batch_filename
+
+                if not batch_file.exists():
+                    for alt_dir in ["failed", "pins"]:
+                        alt_p = dirs[alt_dir] / batch_filename
+                        if alt_p.exists():
+                            shutil.move(str(alt_p), str(batch_file))
+                            break
+
+                if not batch_file.exists():
+                    batch.status = BatchStatus.FAILED
+                    batch.error_message = "File not found on disk"
+                    db_session.commit()
+                    continue
+
+                success, error = upload_csv_to_pinterest(batch_file, account.name, account.proxy_url)
+
+                if success:
+                    batch.status = BatchStatus.DONE
+                    batch.uploaded_at = datetime.now(timezone.utc)
+                    db_session.commit()
+
+                    target = dirs["done"] / batch_filename
+                    batch_file.rename(target)
+
+                    asyncio.run(notify_upload_success(account.name, batch_filename, batch.pin_count))
+                else:
+                    batch.status = BatchStatus.FAILED
+                    batch.error_message = error
+                    db_session.commit()
+
+                    if error == "session_expired":
+                        account.session_valid = False
+                        db_session.commit()
+                        asyncio.run(notify_session_expired(account.name))
+                        break
+
+                    target = dirs["failed"] / batch_filename
+                    batch_file.rename(target)
+
+                    asyncio.run(notify_upload_failed(account.name, batch_filename, error))
+
+                # Check remaining queue level
+                remaining_pending = (
+                    db_session.query(Batch)
+                    .filter_by(account_id=account.id, status=BatchStatus.PENDING)
+                    .all()
+                )
+                remaining_count = len(remaining_pending)
+                remaining_pins = sum(b.pin_count for b in remaining_pending)
+                try:
+                    threshold = int(get_setting(db_session, "low_queue_threshold", "2"))
+                except Exception:
+                    threshold = 2
+
+                if remaining_count <= threshold:
+                    from src.services.notifier import notify_low_queue
+                    logger.warning(f"Account '{account.name}' queue running low: {remaining_count} batches left ({remaining_pins} pins).")
+                    asyncio.run(notify_low_queue(account.name, remaining_count, remaining_pins))
+
+                try:
+                    delay = int(get_setting(db_session, "batch_delay_seconds", "30"))
+                except Exception:
+                    delay = 30
+                time.sleep(delay)
+    except Exception as e:
+        logger.error(f"Error in dynamic queue worker: {e}", exc_info=True)
+    finally:
+        _upload_lock.release()
+
+
 def start_scheduler(scheduler):
-    """Start the scheduler and register all per-account schedules."""
+    """Start the scheduler and register all per-account schedules plus 60s dynamic due queue worker."""
     if hasattr(scheduler, "add_job"):
         sync_account_schedules(scheduler)
+
+        # Register high-frequency queue worker to check and upload due batches every 60 seconds
+        from apscheduler.triggers.interval import IntervalTrigger
+        scheduler.add_job(
+            check_and_run_due_batches,
+            trigger=IntervalTrigger(seconds=60),
+            id="dynamic_due_queue_worker",
+            name="Check and upload due scheduled batches",
+            replace_existing=True,
+        )
+        logger.info("Registered dynamic 60s due-queue worker.")
+
         try:
             scheduler.start()
-            logger.info("APScheduler started with per-account jobs.")
+            logger.info("APScheduler started with per-account jobs and dynamic queue worker.")
         except Exception as e:
             logger.error(f"Failed to start APScheduler: {e}")
     else:
         scheduler.start()
+
 
 
 def update_account_schedule(scheduler, account_id: int, cron_expression: str):
