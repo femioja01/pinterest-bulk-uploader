@@ -643,6 +643,91 @@ async def download_batch(batch_id: int):
     return JSONResponse({"error": "File not found on disk"}, status_code=404)
 
 
+@router.get("/api/history/download-master")
+async def download_master_csv(
+    account_id: int = Query(...),
+    original_filename: str = Query(...),
+):
+    """Download the complete Master CSV for a campaign, either from the saved master file or synthesized from its batches."""
+    import io
+    import csv
+    from fastapi.responses import StreamingResponse
+    from src.services.splitter import detect_delimiter
+
+    factory = get_session_factory()
+    with factory() as session:
+        account = session.query(Account).filter(Account.id == account_id).first()
+        if not account:
+            return JSONResponse({"error": "Account not found"}, status_code=404)
+        account_name = account.name
+
+        query = session.query(Batch).filter(
+            Batch.account_id == account_id,
+            Batch.original_filename == original_filename,
+        )
+        batches = query.order_by(Batch.id.asc()).all()
+
+    dirs = get_account_dir(account_name)
+
+    # 1. Check if an original master archive file exists on disk in done/ or pins/
+    for subdir in ["done", "pins"]:
+        sub_path = dirs / subdir
+        if sub_path.exists():
+            for candidate in sub_path.glob(f"*{original_filename}*"):
+                if candidate.is_file() and candidate.stat().st_size > 0 and not candidate.name.startswith("batch_"):
+                    return FileResponse(candidate, filename=original_filename, media_type="text/csv")
+
+    # 2. Reconstruct master CSV from batch slices in order
+    if not batches:
+        return JSONResponse({"error": "No batches found for this master file"}, status_code=404)
+
+    all_rows = []
+    header = None
+
+    for b in batches:
+        batch_filename = str(b.filename)
+        b_path = None
+        for subdir in ["queue", "done", "failed", "pins"]:
+            p = dirs / subdir / batch_filename
+            if p.exists():
+                b_path = p
+                break
+
+        if not b_path or not b_path.exists():
+            continue
+
+        delim = detect_delimiter(b_path)
+        try:
+            with open(b_path, "r", encoding="utf-8-sig", errors="replace") as f:
+                reader = csv.reader(f, delimiter=delim)
+                file_header = next(reader, None)
+                if header is None and file_header:
+                    header = file_header
+                for row in reader:
+                    if any(cell.strip() for cell in row):
+                        all_rows.append(row)
+        except Exception as e:
+            logger.error(f"Error reading batch {b_path}: {e}")
+
+    if not header or not all_rows:
+        return JSONResponse({"error": "Could not find or reconstruct master CSV data."}, status_code=404)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(header)
+    writer.writerows(all_rows)
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    safe_filename = original_filename if original_filename.endswith(".csv") else f"{original_filename}.csv"
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+    )
+
+
+
 @router.get("/api/history/{batch_id}/dates", response_class=JSONResponse)
 async def get_batch_dates(batch_id: int):
     """Retrieve all pin rows and their current Publish Dates from a batch CSV."""

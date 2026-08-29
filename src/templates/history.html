@@ -126,7 +126,11 @@
                     </span>
                     {% endif %}
 
-                    <button class="btn btn-secondary btn-sm" id="btn-toggle-{{ group.group_id }}" style="font-size: 0.8rem; margin-left: 6px;" onclick="event.stopPropagation(); toggleGroupDetails('{{ group.group_id }}')">
+                    <a href="/api/history/download-master?account_id={{ group.account_id }}&original_filename={{ group.original_filename | urlencode }}" class="btn btn-secondary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation();" title="Download the full original Master CSV containing all pins">
+                        📥 Master CSV
+                    </a>
+
+                    <button class="btn btn-secondary btn-sm" id="btn-toggle-{{ group.group_id }}" style="font-size: 0.8rem; margin-left: 4px;" onclick="event.stopPropagation(); toggleGroupDetails('{{ group.group_id }}')">
                         ▼ View {{ group.total_batches }} Batches
                     </button>
                 </div>
@@ -297,6 +301,9 @@
                     <span class="text-muted" style="font-size: 0.85rem; font-weight: 600;">
                         {{ group.total_pins }} pins across {{ group.total_batches }} batches
                     </span>
+                    <a href="/api/history/download-master?account_id={{ group.account_id }}&original_filename={{ group.original_filename | urlencode }}" class="btn btn-secondary btn-sm" style="font-size: 0.8rem;" onclick="event.stopPropagation();" title="Download the full original Master CSV containing all pins">
+                        📥 Download Master CSV
+                    </a>
                     <button class="btn btn-secondary btn-sm" id="btn-toggle-{{ group.group_id }}" style="font-size: 0.8rem;" onclick="event.stopPropagation(); toggleGroupDetails('{{ group.group_id }}')">
                         ▼ View Batches ({{ group.total_batches }})
                     </button>
