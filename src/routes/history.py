@@ -261,6 +261,7 @@ async def history_page(
             cancelled_count = sum(1 for b in b_list if b.status == BatchStatus.CANCELLED)
 
             pct_done = int((done_count / total_batches) * 100) if total_batches > 0 else 0
+            pending_pins = sum(b.pin_count for b in b_list if b.status in [BatchStatus.PENDING, BatchStatus.CANCELLED])
 
             # Sort batches naturally by filename
             sorted_b = sorted(b_list, key=lambda x: x.filename)
@@ -291,6 +292,7 @@ async def history_page(
                 "created_at": created_str,
                 "total_batches": total_batches,
                 "total_pins": total_pins,
+                "pending_pins": pending_pins,
                 "done_count": done_count,
                 "failed_count": failed_count,
                 "pending_count": pending_count,
@@ -1155,5 +1157,164 @@ async def reschedule_group(data: dict = Body(...)):
             "message": f"Successfully rescheduled {len(pending_batches)} batch(es) in sequence from {start_formatted} to {end_local} ({tz_str})!",
             "count": len(pending_batches),
         }
+
+
+@router.post("/api/history/reslice-group", response_class=JSONResponse)
+async def reslice_group(data: dict = Body(...)):
+    """Re-slice all remaining pending/cancelled batches for a master campaign with a new batch size."""
+    import csv
+    import re
+    from src.services.splitter import detect_delimiter
+
+    account_id = data.get("account_id")
+    original_filename = data.get("original_filename", "").strip()
+    new_batch_size = int(data.get("new_batch_size", 50))
+    interval_value = int(data.get("interval_value", 2))
+    interval_unit = data.get("interval_unit", "days")
+
+    if not account_id or not original_filename:
+        return JSONResponse({"error": "account_id and original_filename are required"}, status_code=400)
+
+    new_batch_size = min(max(new_batch_size, 1), 100)
+
+    factory = get_session_factory()
+    with factory() as session:
+        account = session.query(Account).filter(Account.id == account_id).first()
+        if not account:
+            return JSONResponse({"error": "Account not found"}, status_code=404)
+        account_name = account.name
+
+        target_batches = (
+            session.query(Batch)
+            .filter(
+                Batch.account_id == account_id,
+                Batch.original_filename == original_filename,
+                Batch.status.in_([BatchStatus.PENDING, BatchStatus.CANCELLED]),
+            )
+            .order_by(Batch.id.asc())
+            .all()
+        )
+
+        if not target_batches:
+            return JSONResponse({"error": "No pending or unuploaded batches found to re-slice."}, status_code=400)
+
+        done_batches = (
+            session.query(Batch)
+            .filter(
+                Batch.account_id == account_id,
+                Batch.original_filename == original_filename,
+                Batch.status.in_([BatchStatus.DONE, BatchStatus.PROCESSING]),
+            )
+            .all()
+        )
+
+        highest_done_idx = 0
+        for b in done_batches:
+            m = re.search(r"batch_(\d+)", b.filename)
+            if m:
+                highest_done_idx = max(highest_done_idx, int(m.group(1)))
+
+        start_index = highest_done_idx + 1
+
+        first_scheduled_at = None
+        for b in target_batches:
+            if b.scheduled_upload_at:
+                if first_scheduled_at is None or b.scheduled_upload_at < first_scheduled_at:
+                    first_scheduled_at = b.scheduled_upload_at
+
+        if not first_scheduled_at:
+            first_scheduled_at = datetime.now(timezone.utc) + timedelta(days=1)
+            first_scheduled_at = first_scheduled_at.replace(hour=9, minute=0, second=0, microsecond=0)
+
+        dirs = get_account_dir(account_name)
+        queue_dir = dirs / "queue"
+        queue_dir.mkdir(parents=True, exist_ok=True)
+
+        all_rows = []
+        header = None
+        files_to_delete = []
+
+        for b in target_batches:
+            batch_fn = str(b.filename)
+            for subdir in ["queue", "failed", "pins"]:
+                p = dirs / subdir / batch_fn
+                if p.exists():
+                    files_to_delete.append(p)
+                    delim = detect_delimiter(p)
+                    try:
+                        with open(p, "r", encoding="utf-8-sig", errors="replace") as f:
+                            reader = csv.reader(f, delimiter=delim)
+                            f_header = next(reader, None)
+                            if header is None and f_header:
+                                header = f_header
+                            for row in reader:
+                                if any(cell.strip() for cell in row):
+                                    all_rows.append(row)
+                    except Exception as e:
+                        logger.error(f"Error reading batch {p} during reslice: {e}")
+                    break
+
+        if not header or not all_rows:
+            return JSONResponse({"error": "Failed to read CSV data from unuploaded batches on disk."}, status_code=500)
+
+        # Delete old pending batches from DB
+        for b in target_batches:
+            session.delete(b)
+        session.commit()
+
+        # Delete old files from disk
+        for p in files_to_delete:
+            try:
+                p.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        # Split into new chunks
+        chunks = [all_rows[i:i + new_batch_size] for i in range(0, len(all_rows), new_batch_size)]
+
+        for i, chunk in enumerate(chunks):
+            idx = start_index + i
+            new_filename = f"batch_{idx:03d}.csv"
+            new_path = queue_dir / new_filename
+
+            with open(new_path, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+                writer.writerows(chunk)
+
+            if interval_unit == "hours":
+                step_delta = timedelta(hours=interval_value * i)
+            else:
+                step_delta = timedelta(days=interval_value * i)
+
+            batch_upload_time = first_scheduled_at + step_delta
+
+            new_b = Batch(
+                account_id=account_id,
+                filename=new_filename,
+                original_filename=original_filename,
+                pin_count=len(chunk),
+                status=BatchStatus.PENDING,
+                scheduled_upload_at=batch_upload_time,
+                created_at=datetime.now(timezone.utc),
+            )
+            session.add(new_b)
+
+        log_entry = ActivityLog(
+            account_id=account_id,
+            event_type="reslice",
+            message=f"Re-sliced {len(all_rows)} pending pins of '{original_filename}' into {len(chunks)} batches of up to {new_batch_size} pins each.",
+            timestamp=datetime.now(timezone.utc),
+        )
+        session.add(log_entry)
+        session.commit()
+
+    return {
+        "success": True,
+        "message": f"Successfully re-sliced {len(all_rows)} pending pins into {len(chunks)} batches of {new_batch_size} pins each!",
+        "new_batch_count": len(chunks),
+        "total_pins": len(all_rows),
+    }
+
 
 

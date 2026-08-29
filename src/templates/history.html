@@ -94,6 +94,9 @@
                     <button class="btn btn-secondary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); openGroupRescheduleModal({{ group.account_id }}, '{{ group.original_filename }}', {{ group.pending_count }})" title="Reschedule all pending batches in this master campaign">
                         ⏱️ Reschedule Queue ({{ group.pending_count }})
                     </button>
+                    <button class="btn btn-secondary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); openResliceModal({{ group.account_id }}, '{{ group.original_filename }}', {{ group.pending_count }}, {{ group.pending_pins }})" title="Re-slice remaining unuploaded pins into new batch sizes (e.g. from 90 to 60 pins/batch)">
+                        ✂️ Re-slice Queue ({{ group.pending_pins }} pins)
+                    </button>
                     {% endif %}
 
                     {% if group.cancelled_count > 0 %}
@@ -548,6 +551,78 @@
     </div>
 </div>
 
+<!-- MODAL: RE-SLICE QUEUE (DYNAMIC BATCH RESIZING) -->
+<div id="modal-reslice" class="modal-overlay" style="display: none; position: fixed; inset: 0; width: 100%; height: 100%; background: rgba(15,23,42,0.65); z-index: 99999; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+    <div class="modal" style="background: #ffffff; border-radius: 12px; width: 90%; max-width: 520px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.25); overflow: hidden; transform: translateY(0);">
+        <!-- Modal Header -->
+        <div class="modal-header d-flex justify-between align-center" style="padding: 16px 22px; border-bottom: 1px solid var(--border-color); background: #f8fafc;">
+            <div>
+                <h3 style="margin: 0; font-size: 1.15rem; color: var(--text-dark);">✂️ Re-slice Unuploaded Queue</h3>
+                <div class="text-muted" style="font-size: 0.8rem; margin-top: 2px;" id="reslice-subtitle">Campaign: master.csv</div>
+            </div>
+            <button type="button" class="btn btn-ghost" onclick="closeResliceModal()" style="font-size: 1.2rem; line-height: 1; padding: 4px 8px; border: none; background: transparent; cursor: pointer;">✕</button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="modal-body" style="padding: 20px 22px;">
+            <!-- Current Status Box -->
+            <div style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px; margin-bottom: 18px;">
+                <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Current Pending Queue:</div>
+                <div style="font-size: 1rem; font-weight: 700; color: var(--primary); margin-top: 2px;" id="reslice-current-status">
+                    360 pins across 4 batches
+                </div>
+            </div>
+
+            <!-- New Batch Size Input -->
+            <div class="form-group" style="margin-bottom: 18px;">
+                <label for="reslice-batch-size"><strong>New Batch Size (max 100 pins per batch):</strong></label>
+                <div class="d-flex gap-2 align-center" style="margin-top: 6px;">
+                    <input type="number" id="reslice-batch-size" class="form-input" min="1" max="100" value="50" style="width: 120px; font-size: 1rem; font-weight: 600;" oninput="updateReslicePreview()">
+                    <!-- Quick Presets -->
+                    <div class="d-flex gap-1">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="setResliceSize(25)">25</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="setResliceSize(50)">50</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="setResliceSize(60)">60</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="setResliceSize(80)">80</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="setResliceSize(100)">100</button>
+                    </div>
+                </div>
+                <p class="text-muted" style="font-size: 0.78rem; margin-top: 4px;">Choose how many pins each newly created batch file will contain.</p>
+            </div>
+
+            <!-- Live Calculation Preview Card -->
+            <div style="background: rgba(59, 130, 246, 0.05); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; padding: 14px; margin-bottom: 18px;">
+                <div style="font-size: 0.8rem; font-weight: 600; color: var(--primary); margin-bottom: 4px;">⚡ Result Preview:</div>
+                <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-dark);" id="reslice-preview-text">
+                    Will be re-sliced into 8 batches of 50 pins
+                </div>
+            </div>
+
+            <!-- Spacing Interval for New Batches -->
+            <div class="form-group" style="margin-bottom: 10px;">
+                <label for="reslice-interval"><strong>Upload Spacing for New Batches:</strong></label>
+                <select id="reslice-interval" class="form-select" style="width: 100%; margin-top: 4px;">
+                    <option value="1_days">Every 1 Day (24 Hours - Daily Drip)</option>
+                    <option value="2_days" selected>Every 2 Days (48 Hours - Recommended)</option>
+                    <option value="3_days">Every 3 Days (72 Hours)</option>
+                    <option value="4_days">Every 4 Days</option>
+                    <option value="7_days">Every 1 Week (7 Days)</option>
+                    <option value="12_hours">Every 12 Hours (Twice a Day)</option>
+                </select>
+                <p class="text-muted" style="font-size: 0.78rem; margin-top: 4px;">Upload schedule begins from the earliest queued batch time and spaces out automatically.</p>
+            </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-footer d-flex justify-between align-center" style="padding: 14px 22px; border-top: 1px solid var(--border-color); background: #f8fafc;">
+            <button type="button" class="btn btn-secondary" onclick="closeResliceModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-save-reslice" onclick="saveReslice()" style="font-weight: 600;">
+                ✂️ Confirm & Re-slice Queue
+            </button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -847,6 +922,116 @@
             .catch(() => showToast('Network error', 'error'));
     }
 
+    // Reslice Queue Handlers
+    let resliceAccountId = null;
+    let resliceOrigFilename = null;
+    let reslicePendingPins = 0;
+    let reslicePendingBatches = 0;
+
+    function openResliceModal(accountId, origFilename, pendingBatches, pendingPins) {
+        resliceAccountId = accountId;
+        resliceOrigFilename = origFilename;
+        reslicePendingBatches = pendingBatches;
+        reslicePendingPins = pendingPins || 0;
+
+        const modal = document.getElementById('modal-reslice');
+        if (!modal) return;
+
+        document.getElementById('reslice-subtitle').textContent = `Campaign: ${origFilename}`;
+        document.getElementById('reslice-current-status').textContent = `${reslicePendingPins} pins across ${pendingBatches} pending batch(es)`;
+        
+        updateReslicePreview();
+
+        modal.classList.add('active');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
+    }
+
+    function closeResliceModal() {
+        const modal = document.getElementById('modal-reslice');
+        if (modal) {
+            modal.classList.remove('active');
+            modal.style.setProperty('display', 'none', 'important');
+            modal.style.setProperty('opacity', '0', 'important');
+            modal.style.setProperty('visibility', 'hidden', 'important');
+        }
+        resliceAccountId = null;
+        resliceOrigFilename = null;
+    }
+
+    function setResliceSize(size) {
+        document.getElementById('reslice-batch-size').value = size;
+        updateReslicePreview();
+    }
+
+    function updateReslicePreview() {
+        const sizeInput = document.getElementById('reslice-batch-size');
+        let size = parseInt(sizeInput.value) || 50;
+        size = Math.min(Math.max(size, 1), 100);
+
+        const pins = reslicePendingPins;
+        if (pins > 0) {
+            const batchCount = Math.ceil(pins / size);
+            const fullBatches = Math.floor(pins / size);
+            const remainder = pins % size;
+
+            let desc = `⚡ Will create ${batchCount} new batch${batchCount > 1 ? 'es' : ''}: `;
+            if (remainder === 0) {
+                desc += `${batchCount} batch${batchCount > 1 ? 'es' : ''} of ${size} pins each.`;
+            } else if (fullBatches === 0) {
+                desc += `1 batch of ${remainder} pins.`;
+            } else {
+                desc += `${fullBatches} batch${fullBatches > 1 ? 'es' : ''} of ${size} pins + 1 batch of ${remainder} pins.`;
+            }
+            document.getElementById('reslice-preview-text').textContent = desc;
+        } else {
+            document.getElementById('reslice-preview-text').textContent = `Batches will be re-sliced to ${size} pins per batch.`;
+        }
+    }
+
+    function saveReslice() {
+        const sizeInput = document.getElementById('reslice-batch-size');
+        const size = parseInt(sizeInput.value) || 50;
+        const intervalSelect = document.getElementById('reslice-interval').value;
+        const parts = intervalSelect.split('_');
+        const intervalVal = parseInt(parts[0]) || 2;
+        const intervalUnit = parts[1] || 'days';
+
+        const btn = document.getElementById('btn-save-reslice');
+        btn.disabled = true;
+        btn.textContent = 'Re-slicing batches...';
+
+        fetch('/api/history/reslice-group', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                account_id: resliceAccountId,
+                original_filename: resliceOrigFilename,
+                new_batch_size: size,
+                interval_value: intervalVal,
+                interval_unit: intervalUnit
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.textContent = '✂️ Confirm & Re-slice Queue';
+            if (data.success) {
+                showToast(data.message || 'Queue successfully re-sliced!', 'success');
+                closeResliceModal();
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                showToast(data.error || 'Failed to re-slice queue', 'error');
+            }
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.textContent = '✂️ Confirm & Re-slice Queue';
+            showToast('Network error while re-slicing queue', 'error');
+        });
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('modal-reschedule');
         if (modal) {
@@ -854,9 +1039,19 @@
                 if (e.target === modal) closeRescheduleModal();
             });
         }
+        const resliceModal = document.getElementById('modal-reslice');
+        if (resliceModal) {
+            resliceModal.addEventListener('click', (e) => {
+                if (e.target === resliceModal) closeResliceModal();
+            });
+        }
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeRescheduleModal();
+            if (e.key === 'Escape') {
+                closeRescheduleModal();
+                closeResliceModal();
+            }
         });
     });
 </script>
 {% endblock %}
+
