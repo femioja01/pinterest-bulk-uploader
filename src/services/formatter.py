@@ -102,10 +102,10 @@ def inspect_master_csv(file_bytes_or_path: bytes | Path | str) -> dict:
         df["_week_num"] = df[week_col].apply(
             lambda x: int(re.search(r"\d+", str(x)).group()) if re.search(r"\d+", str(x)) else 999
         )
-        unique_weeks = sorted([w for w in df["_week_num"].unique() if w != 999])
+        unique_weeks = sorted([int(w) for w in df["_week_num"].unique() if int(w) != 999])
         for w in unique_weeks:
             count = int((df["_week_num"] == w).sum())
-            detected_weeks.append({"week_num": w, "label": f"Week {w}", "count": count})
+            detected_weeks.append({"week_num": int(w), "label": f"Week {w}", "count": int(count)})
 
     # Find required columns
     title_col = find_col(df, ["pin_title", "title", "pintitle"])

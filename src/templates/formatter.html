@@ -338,12 +338,12 @@
             method: 'POST',
             body: formData
         })
-        .then(res => res.json())
-        .then(data => {
-            if (data.error) {
+        .then(async res => {
+            const data = await res.json().catch(() => ({ error: 'Server returned an invalid response' }));
+            if (!res.ok || data.error) {
                 statusEl.style.background = '#fef2f2';
                 statusEl.style.color = 'var(--danger)';
-                statusEl.textContent = `❌ ${data.error}`;
+                statusEl.textContent = `❌ ${data.error || 'Failed to inspect CSV'}`;
                 document.getElementById('btn-process').disabled = true;
                 return;
             }
@@ -392,7 +392,7 @@
         .catch(err => {
             statusEl.style.background = '#fef2f2';
             statusEl.style.color = 'var(--danger)';
-            statusEl.textContent = '❌ Failed to inspect CSV';
+            statusEl.textContent = `❌ Network error inspecting CSV: ${err.message || err}`;
         });
     }
 
