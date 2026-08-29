@@ -61,6 +61,7 @@ async def inspect_csv_endpoint(file: UploadFile = File(...)):
 @router.post("/api/formatter/convert")
 async def convert_csv_endpoint(
     file: UploadFile = File(...),
+    target_template: str = Form("pinterest"),
     start_week: str = Form(""),
     end_week: str = Form(""),
     specific_weeks: str = Form(""),
@@ -70,7 +71,7 @@ async def convert_csv_endpoint(
     publish_daily_start: str = Form("08:00"),
     publish_daily_end: str = Form("22:00"),
 ):
-    """Format master CSV into Official Pinterest Bulk CSV format and return as download."""
+    """Format master CSV into Official Pinterest or Publer Bulk CSV format and return as download."""
     try:
         content = await file.read()
 
@@ -82,6 +83,7 @@ async def convert_csv_endpoint(
 
         out_df, qa_report = format_master_csv(
             content,
+            target_template=target_template,
             start_week=s_week,
             end_week=e_week,
             specific_weeks=spec_weeks,
@@ -107,12 +109,13 @@ async def convert_csv_endpoint(
         elif e_week:
             week_tag = f"_Up_to_Week{e_week}"
         else:
-            week_tag = "_Official_Bulk"
+            week_tag = "_Bulk"
 
         if schedule_publish_dates:
             week_tag += "_Scheduled"
 
-        out_filename = f"{clean_base}{week_tag}_Pinterest.csv"
+        tmpl_name = "Publer" if target_template.lower() == "publer" else "Pinterest"
+        out_filename = f"{clean_base}{week_tag}_{tmpl_name}.csv"
 
         return StreamingResponse(
             io.BytesIO(csv_bytes),

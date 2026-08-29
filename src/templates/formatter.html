@@ -4,9 +4,9 @@
 {% block content %}
 <div class="page-header d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px;">
     <div>
-        <h1 style="margin-bottom: 4px;">✨ Pinterest Bulk CSV Formatter</h1>
+        <h1 style="margin-bottom: 4px;">✨ CSV Formatter & Bulk Exporter</h1>
         <p class="text-muted" style="margin: 0; font-size: 0.9rem;">
-            Convert raw Master Pin spreadsheets into Pinterest's Official 8-Column Bulk Upload format with natural week ordering, intelligent description trimming, and auto-generated publish schedules.
+            Convert raw Master Pin spreadsheets into <strong>Pinterest Official</strong> or <strong>Publer Bulk</strong> format with natural week ordering, description trimming, and auto-generated schedules.
         </p>
     </div>
 </div>
@@ -37,6 +37,29 @@
 
                 <!-- Inspection Loading / Status -->
                 <div id="inspect-status" style="display: none; margin-top: 14px; padding: 10px 14px; border-radius: 8px; font-size: 0.84rem;"></div>
+
+                <!-- Target Template Format Selector -->
+                <div id="template-selector-section" style="margin-top: 18px;">
+                    <label style="margin-bottom: 8px; display: block;">
+                        <strong>🎯 Target Export Template:</strong>
+                    </label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <label style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 2px solid var(--primary); border-radius: 8px; background: #eff6ff; cursor: pointer; transition: all 0.15s ease;" id="label-tmpl-pinterest">
+                            <input type="radio" name="target_template" value="pinterest" checked onchange="onTemplateChange('pinterest')">
+                            <div>
+                                <strong style="font-size: 0.86rem; color: var(--text-dark); display: block;">📌 Pinterest Official</strong>
+                                <span class="text-muted" style="font-size: 0.72rem;">8 Columns • ISO Dates</span>
+                            </div>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #ffffff; cursor: pointer; transition: all 0.15s ease;" id="label-tmpl-publer">
+                            <input type="radio" name="target_template" value="publer" onchange="onTemplateChange('publer')">
+                            <div>
+                                <strong style="font-size: 0.86rem; color: var(--text-dark); display: block;">🚀 Publer Bulk</strong>
+                                <span class="text-muted" style="font-size: 0.72rem;">12 Columns • Std Dates</span>
+                            </div>
+                        </label>
+                    </div>
+                </div>
 
                 <!-- Column Mapping Preview Card (Shown after inspection) -->
                 <div id="mapping-card" style="display: none; margin-top: 16px; background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
@@ -105,8 +128,8 @@
                         <input type="checkbox" id="chk-auto-schedule" checked onchange="toggleAutoScheduleOptions()">
                         <strong style="font-size: 0.9rem; color: var(--primary);">🗓️ Auto-Generate Pin Publish Dates</strong>
                     </label>
-                    <p class="text-muted" style="font-size: 0.76rem; margin: 0 0 12px 24px;">
-                        Automatically populates the <code>Publish Date</code> column with evenly spaced ISO timestamps.
+                    <p class="text-muted" style="font-size: 0.76rem; margin: 0 0 12px 24px;" id="schedule-desc-text">
+                        Automatically populates the publish date column with evenly spaced timestamps.
                     </p>
 
                     <div id="auto-schedule-fields" style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
@@ -185,13 +208,13 @@
         
         <div style="padding: 16px 20px; background: #f8fafc; border-bottom: 1px solid var(--border-color);" class="d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px;">
             <div>
-                <h3 style="margin: 0; font-size: 1.05rem; color: var(--text-dark);">📋 Quality Assurance & Verification</h3>
-                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
-                    Strict validation against Pinterest Bulk Pin Specifications
+                <h3 style="margin: 0; font-size: 1.05rem; color: var(--text-dark);" id="qa-heading-title">📋 Quality Assurance & Verification</h3>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;" id="qa-subheading">
+                    Strict validation against Pinterest Bulk Specifications
                 </div>
             </div>
             <div id="action-buttons-top" style="display: none;" class="d-flex gap-2">
-                <button type="button" class="btn btn-primary btn-sm" onclick="executeFormatting()">
+                <button type="button" class="btn btn-primary btn-sm" onclick="executeFormatting()" id="btn-download-top">
                     📥 Download Formatted CSV
                 </button>
             </div>
@@ -213,7 +236,7 @@
             </div>
             <div style="background: #ffffff; padding: 12px 16px;">
                 <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Publish Dates</div>
-                <div style="font-size: 0.95rem; font-weight: 700; color: var(--primary);" id="stat-qa-publish">Auto (ISO)</div>
+                <div style="font-size: 0.92rem; font-weight: 700; color: var(--primary);" id="stat-qa-publish">Auto (ISO)</div>
             </div>
         </div>
 
@@ -225,7 +248,7 @@
                 <span class="icon" style="font-size: 3.2rem; display: block; margin-bottom: 12px;">📑</span>
                 <h3 style="margin-bottom: 6px; color: var(--text-dark);">No CSV Loaded</h3>
                 <p class="text-muted" style="max-width: 440px; margin: 0 auto;">
-                    Upload any master spreadsheet on the left. The formatter will automatically sort weeks naturally (Week 1 → Week N), trim descriptions to sentence boundaries (≤ 500 chars), and auto-generate publish dates.
+                    Upload any master spreadsheet on the left. The formatter will automatically sort weeks naturally (Week 1 → Week N), trim descriptions to sentence boundaries (≤ 500 chars), and format columns to match your selected template.
                 </p>
             </div>
 
@@ -233,11 +256,11 @@
             <div id="preview-container" style="display: none; flex: 1;">
                 <div class="d-flex justify-between align-center" style="margin-bottom: 10px;">
                     <strong style="font-size: 0.88rem; color: var(--text-dark);">Sample Formatted Output (First 5 Pins):</strong>
-                    <span class="status-badge badge-success" style="font-size: 0.72rem;">8 Official Columns Ready</span>
+                    <span class="status-badge badge-success" style="font-size: 0.72rem;" id="badge-columns-ready">8 Columns Ready</span>
                 </div>
                 <div class="table-container" style="max-height: 420px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px;">
                     <table class="data-table" style="font-size: 0.8rem; margin: 0;">
-                        <thead>
+                        <thead id="preview-thead">
                             <tr style="background: #f1f5f9; position: sticky; top: 0; z-index: 10;">
                                 <th>Title (≤100)</th>
                                 <th>Media URL</th>
@@ -263,6 +286,7 @@
     let selectedMasterFile = null;
     let masterInspectionData = null;
     let selectedSpecificWeeks = new Set();
+    let currentTemplate = 'pinterest';
 
     window.addEventListener('DOMContentLoaded', () => {
         const dropzone = document.getElementById('master-dropzone');
@@ -287,6 +311,35 @@
             }
         });
     });
+
+    function onTemplateChange(tmpl) {
+        currentTemplate = tmpl;
+        const pCard = document.getElementById('label-tmpl-pinterest');
+        const pubCard = document.getElementById('label-tmpl-publer');
+        const queueSection = document.getElementById('queue-destination-section');
+
+        if (tmpl === 'publer') {
+            pCard.style.borderColor = 'var(--border-color)';
+            pCard.style.background = '#ffffff';
+            pubCard.style.borderColor = 'var(--primary)';
+            pubCard.style.background = '#eff6ff';
+
+            if (queueSection) queueSection.style.display = 'none';
+            document.getElementById('qa-subheading').textContent = 'Strict validation against Publer Multi-Platform Bulk Specifications';
+            document.getElementById('badge-columns-ready').textContent = '12 Publer Columns Ready';
+        } else {
+            pCard.style.borderColor = 'var(--primary)';
+            pCard.style.background = '#eff6ff';
+            pubCard.style.borderColor = 'var(--border-color)';
+            pubCard.style.background = '#ffffff';
+
+            if (masterInspectionData && queueSection) queueSection.style.display = 'block';
+            document.getElementById('qa-subheading').textContent = 'Strict validation against Pinterest Bulk Specifications';
+            document.getElementById('badge-columns-ready').textContent = '8 Pinterest Columns Ready';
+        }
+
+        updateActionPreview();
+    }
 
     function setPublishDatePreset(daysFromToday) {
         const d = new Date();
@@ -384,7 +437,9 @@
             }
 
             document.getElementById('schedule-dates-section').style.display = 'block';
-            document.getElementById('queue-destination-section').style.display = 'block';
+            if (currentTemplate === 'pinterest') {
+                document.getElementById('queue-destination-section').style.display = 'block';
+            }
             document.getElementById('btn-process').disabled = false;
 
             updateActionPreview();
@@ -416,12 +471,7 @@
     function toggleDirectQueueOptions() {
         const isChecked = document.getElementById('chk-direct-queue').checked;
         document.getElementById('direct-queue-fields').style.display = isChecked ? 'block' : 'none';
-        const btn = document.getElementById('btn-process');
-        if (isChecked) {
-            btn.textContent = '✨ Convert & Queue for Account';
-        } else {
-            btn.textContent = '✨ Convert to Official Pinterest CSV';
-        }
+        updateActionPreview();
     }
 
     function updateActionPreview() {
@@ -431,7 +481,18 @@
         document.getElementById('stat-qa-desc').textContent = '≤ 500 chars';
         const isSchedule = document.getElementById('chk-auto-schedule').checked;
         const pinsPerDay = document.getElementById('publish_pins_per_day').value || 25;
-        document.getElementById('stat-qa-publish').textContent = isSchedule ? `${pinsPerDay}/day (ISO)` : 'Blank';
+        const dateType = currentTemplate === 'publer' ? 'Std' : 'ISO';
+        document.getElementById('stat-qa-publish').textContent = isSchedule ? `${pinsPerDay}/day (${dateType})` : 'Blank';
+
+        const btn = document.getElementById('btn-process');
+        const isChecked = document.getElementById('chk-direct-queue')?.checked;
+        if (currentTemplate === 'publer') {
+            btn.textContent = '🚀 Convert to Publer Bulk CSV';
+        } else if (isChecked) {
+            btn.textContent = '✨ Convert & Queue for Account';
+        } else {
+            btn.textContent = '✨ Convert to Official Pinterest CSV';
+        }
     }
 
     function executeFormatting() {
@@ -440,7 +501,7 @@
             return;
         }
 
-        const isDirectQueue = document.getElementById('chk-direct-queue').checked;
+        const isDirectQueue = currentTemplate === 'pinterest' && document.getElementById('chk-direct-queue').checked;
         const isAutoSchedule = document.getElementById('chk-auto-schedule').checked;
         const weekMode = document.querySelector('input[name="week_mode"]:checked')?.value || 'all';
 
@@ -461,6 +522,7 @@
 
         const formData = new FormData();
         formData.append('file', selectedMasterFile);
+        formData.append('target_template', currentTemplate);
         formData.append('start_week', startWeek);
         formData.append('end_week', endWeek);
         formData.append('specific_weeks', specificWeeks);
@@ -481,10 +543,10 @@
             .then(res => res.json())
             .then(data => {
                 btn.disabled = false;
-                btn.textContent = '✨ Convert & Queue for Account';
+                updateActionPreview();
                 if (data.success) {
                     showToast(data.message, 'success');
-                    renderPreviewTable(data.qa_report.sample_rows);
+                    renderPreviewTable(data.qa_report.sample_rows, currentTemplate);
                     setTimeout(() => window.location.href = '/history', 1500);
                 } else {
                     showToast(data.error || 'Failed to format and queue', 'error');
@@ -492,7 +554,7 @@
             })
             .catch(err => {
                 btn.disabled = false;
-                btn.textContent = '✨ Convert & Queue for Account';
+                updateActionPreview();
                 showToast('Network error while processing CSV', 'error');
             });
         } else {
@@ -503,7 +565,7 @@
             })
             .then(async res => {
                 btn.disabled = false;
-                btn.textContent = '✨ Convert to Official Pinterest CSV';
+                updateActionPreview();
                 if (!res.ok) {
                     const errData = await res.json();
                     showToast(errData.error || 'Formatting failed', 'error');
@@ -511,7 +573,7 @@
                 }
 
                 const disposition = res.headers.get('Content-Disposition');
-                let filename = 'Official_Pinterest_Bulk_Pins.csv';
+                let filename = currentTemplate === 'publer' ? 'Publer_Bulk_Template.csv' : 'Official_Pinterest_Bulk_Pins.csv';
                 if (disposition && disposition.includes('filename=')) {
                     filename = disposition.split('filename=')[1].replace(/["']/g, '');
                 }
@@ -531,32 +593,68 @@
             })
             .catch(err => {
                 btn.disabled = false;
-                btn.textContent = '✨ Convert to Official Pinterest CSV';
+                updateActionPreview();
                 showToast('Network error during conversion', 'error');
             });
         }
     }
 
-    function renderPreviewTable(samples) {
+    function renderPreviewTable(samples, tmpl) {
         if (!samples || samples.length === 0) return;
         document.getElementById('preview-placeholder').style.display = 'none';
         document.getElementById('preview-container').style.display = 'block';
 
+        const thead = document.getElementById('preview-thead');
         const tbody = document.getElementById('preview-tbody');
         tbody.innerHTML = '';
 
-        samples.forEach(row => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td style="font-weight: 600; color: var(--text-dark); max-width: 180px;">${row.Title}</td>
-                <td><a href="${row['Media URL']}" target="_blank" style="font-size: 0.72rem; color: var(--primary);">View Media</a></td>
-                <td><span class="status-badge badge-pending" style="font-size: 0.72rem;">${row['Pinterest Board']}</span></td>
-                <td style="font-size: 0.75rem; color: var(--text-muted); max-width: 240px; line-height: 1.4;">${row.Description}</td>
-                <td style="font-size: 0.75rem; font-family: monospace; color: var(--primary);">${row['Publish Date'] || '-'}</td>
-                <td><a href="${row.Link}" target="_blank" style="font-size: 0.72rem; color: var(--primary);">Article Link</a></td>
+        if (tmpl === 'publer') {
+            thead.innerHTML = `
+                <tr style="background: #f1f5f9; position: sticky; top: 0; z-index: 10;">
+                    <th>Title (≤100)</th>
+                    <th>Media URL</th>
+                    <th>Pin Board</th>
+                    <th>Text / Description (≤500)</th>
+                    <th>Date - Intl. format</th>
+                    <th>Link</th>
+                </tr>
             `;
-            tbody.appendChild(tr);
-        });
+            samples.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="font-weight: 600; color: var(--text-dark); max-width: 180px;">${row['Title - For the video, pin, PDF ..']}</td>
+                    <td><a href="${row['Media URL(s) - Separated by comma']}" target="_blank" style="font-size: 0.72rem; color: var(--primary);">View Media</a></td>
+                    <td><span class="status-badge badge-pending" style="font-size: 0.72rem;">${row['Pin board, FB album, or Google category']}</span></td>
+                    <td style="font-size: 0.75rem; color: var(--text-muted); max-width: 240px; line-height: 1.4;">${row.Text}</td>
+                    <td style="font-size: 0.75rem; font-family: monospace; color: var(--primary);">${row['Date - Intl. format or prompt'] || '-'}</td>
+                    <td><a href="${row['Link(s) - Separated by comma for FB carousels']}" target="_blank" style="font-size: 0.72rem; color: var(--primary);">Article Link</a></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } else {
+            thead.innerHTML = `
+                <tr style="background: #f1f5f9; position: sticky; top: 0; z-index: 10;">
+                    <th>Title (≤100)</th>
+                    <th>Media URL</th>
+                    <th>Pinterest Board</th>
+                    <th>Description (≤500)</th>
+                    <th>Publish Date</th>
+                    <th>Link</th>
+                </tr>
+            `;
+            samples.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="font-weight: 600; color: var(--text-dark); max-width: 180px;">${row.Title}</td>
+                    <td><a href="${row['Media URL']}" target="_blank" style="font-size: 0.72rem; color: var(--primary);">View Media</a></td>
+                    <td><span class="status-badge badge-pending" style="font-size: 0.72rem;">${row['Pinterest Board']}</span></td>
+                    <td style="font-size: 0.75rem; color: var(--text-muted); max-width: 240px; line-height: 1.4;">${row.Description}</td>
+                    <td style="font-size: 0.75rem; font-family: monospace; color: var(--primary);">${row['Publish Date'] || '-'}</td>
+                    <td><a href="${row.Link}" target="_blank" style="font-size: 0.72rem; color: var(--primary);">Article Link</a></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
     }
 </script>
 {% endblock %}

@@ -11,6 +11,7 @@ Converts Master/Raw Pin CSV files into Pinterest's Official Bulk Upload format w
 import io
 import re
 import logging
+from datetime import datetime, date, time, timedelta
 from pathlib import Path
 import pandas as pd
 
@@ -143,7 +144,20 @@ def inspect_master_csv(file_bytes_or_path: bytes | Path | str) -> dict:
     }
 
 
-from datetime import datetime, date, time, timedelta
+PUBLER_COLUMNS = [
+    "Date - Intl. format or prompt",
+    "Text",
+    "Link(s) - Separated by comma for FB carousels",
+    "Media URL(s) - Separated by comma",
+    "Title - For the video, pin, PDF ..",
+    "Label(s) - Separated by comma",
+    "Alt text(s) - Separated by ||",
+    "Comment(s) - Separated by ||",
+    "Pin board, FB album, or Google category",
+    "Post subtype - I.e. story, reel, PDF ..",
+    "CTA - For Facebook links or Google",
+    "Reminder - For stories, reels, shorts, and TikToks",
+]
 
 
 def generate_pin_publish_dates(
@@ -152,8 +166,9 @@ def generate_pin_publish_dates(
     pins_per_day: int = 25,
     daily_start: str = "08:00",
     daily_end: str = "22:00",
+    date_format: str = "iso",
 ) -> list[str]:
-    """Generates ISO-8601 publish dates formatted as YYYY-MM-DDTHH:MM:SS for all pins."""
+    """Generates publish dates formatted as ISO (YYYY-MM-DDTHH:MM:SS) or Standard (YYYY-MM-DD HH:MM:SS)."""
     try:
         start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
     except Exception:
@@ -187,7 +202,10 @@ def generate_pin_publish_dates(
             m = (sec_offset % 3600) // 60
             s = sec_offset % 60
             dt = datetime.combine(current_day, time(hour=h, minute=m, second=s))
-            dates.append(dt.strftime("%Y-%m-%dT%H:%M:%S"))
+            if date_format == "standard":
+                dates.append(dt.strftime("%Y-%m-%d %H:%M:%S"))
+            else:
+                dates.append(dt.strftime("%Y-%m-%dT%H:%M:%S"))
             generated += 1
 
         current_day += timedelta(days=1)
@@ -197,6 +215,7 @@ def generate_pin_publish_dates(
 
 def format_master_csv(
     file_bytes_or_path: bytes | Path | str,
+    target_template: str = "pinterest",
     start_week: int | None = None,
     end_week: int | None = None,
     specific_weeks: list[int] | None = None,
@@ -206,7 +225,7 @@ def format_master_csv(
     publish_daily_start: str = "08:00",
     publish_daily_end: str = "22:00",
 ) -> tuple[pd.DataFrame, dict]:
-    """Formats a Master CSV into Pinterest's Official Bulk Upload format."""
+    """Formats a Master CSV into Pinterest Official or Publer Bulk Upload format."""
     if isinstance(file_bytes_or_path, bytes):
         df = pd.read_csv(io.BytesIO(file_bytes_or_path), encoding="utf-8-sig", encoding_errors="replace")
     else:
@@ -256,38 +275,63 @@ def format_master_csv(
     cleaned_titles = df[title_col].apply(lambda x: clean_title(x, max_len=100))
     cleaned_descriptions = df[desc_col].apply(lambda x: clean_description(x, max_len=500))
 
-    # Build Official Pinterest DataFrame
-    out_df = pd.DataFrame()
-    out_df["Title"] = cleaned_titles
-    out_df["Media URL"] = df[media_col].astype(str).str.strip()
-    out_df["Pinterest Board"] = df[board_col].astype(str).str.strip()
-    out_df["Thumbnail"] = ""
-    out_df["Description"] = cleaned_descriptions
-    out_df["Link"] = df[link_col].astype(str).str.strip()
-    out_df["Publish Date"] = ""
-    out_df["Keywords"] = ""
-
-    # Drop any completely empty rows
-    out_df = out_df.dropna(subset=["Title", "Media URL", "Pinterest Board"]).reset_index(drop=True)
-
-    # Automatically generate and populate Publish Dates if requested
-    if schedule_publish_dates and len(out_df) > 0:
+    # Pre-generate publish dates if requested
+    pub_dates = []
+    if schedule_publish_dates and len(df) > 0:
         if not publish_start_date:
             publish_start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        dt_format = "standard" if target_template.lower() == "publer" else "iso"
         pub_dates = generate_pin_publish_dates(
-            total_pins=len(out_df),
+            total_pins=len(df),
             start_date_str=publish_start_date,
             pins_per_day=publish_pins_per_day,
             daily_start=publish_daily_start,
             daily_end=publish_daily_end,
+            date_format=dt_format,
         )
-        out_df["Publish Date"] = pub_dates
+
+    # Build target DataFrame based on selected template
+    out_df = pd.DataFrame()
+    if target_template.lower() == "publer":
+        out_df["Date - Intl. format or prompt"] = pub_dates if schedule_publish_dates else ""
+        out_df["Text"] = cleaned_descriptions
+        out_df["Link(s) - Separated by comma for FB carousels"] = df[link_col].astype(str).str.strip()
+        out_df["Media URL(s) - Separated by comma"] = df[media_col].astype(str).str.strip()
+        out_df["Title - For the video, pin, PDF .."] = cleaned_titles
+        out_df["Label(s) - Separated by comma"] = ""
+        out_df["Alt text(s) - Separated by ||"] = ""
+        out_df["Comment(s) - Separated by ||"] = ""
+        out_df["Pin board, FB album, or Google category"] = df[board_col].astype(str).str.strip()
+        out_df["Post subtype - I.e. story, reel, PDF .."] = ""
+        out_df["CTA - For Facebook links or Google"] = ""
+        out_df["Reminder - For stories, reels, shorts, and TikToks"] = ""
+
+        # Drop empty rows
+        out_df = out_df.dropna(subset=["Text", "Media URL(s) - Separated by comma"]).reset_index(drop=True)
+    else:
+        # Pinterest Official 8-column format
+        out_df["Title"] = cleaned_titles
+        out_df["Media URL"] = df[media_col].astype(str).str.strip()
+        out_df["Pinterest Board"] = df[board_col].astype(str).str.strip()
+        out_df["Thumbnail"] = ""
+        out_df["Description"] = cleaned_descriptions
+        out_df["Link"] = df[link_col].astype(str).str.strip()
+        out_df["Publish Date"] = pub_dates if schedule_publish_dates else ""
+        out_df["Keywords"] = ""
+
+        # Drop empty rows
+        out_df = out_df.dropna(subset=["Title", "Media URL", "Pinterest Board"]).reset_index(drop=True)
 
     # QA Verification Stats
-    desc_lens = out_df["Description"].astype(str).str.len()
-    title_lens = out_df["Title"].astype(str).str.len()
+    desc_series = out_df["Text"] if target_template.lower() == "publer" else out_df["Description"]
+    title_series = out_df["Title - For the video, pin, PDF .."] if target_template.lower() == "publer" else out_df["Title"]
+    date_col_name = "Date - Intl. format or prompt" if target_template.lower() == "publer" else "Publish Date"
+
+    desc_lens = desc_series.astype(str).str.len()
+    title_lens = title_series.astype(str).str.len()
 
     qa_report = {
+        "target_template": target_template,
         "total_raw_rows": total_raw_rows,
         "total_output_pins": len(out_df),
         "max_title_length": int(title_lens.max()) if len(title_lens) > 0 else 0,
@@ -295,14 +339,11 @@ def format_master_csv(
         "max_desc_length": int(desc_lens.max()) if len(desc_lens) > 0 else 0,
         "descriptions_over_500": int((desc_lens > 500).sum()),
         "has_publish_dates": schedule_publish_dates,
-        "first_publish_date": str(out_df["Publish Date"].iloc[0]) if len(out_df) > 0 and schedule_publish_dates else "",
-        "last_publish_date": str(out_df["Publish Date"].iloc[-1]) if len(out_df) > 0 and schedule_publish_dates else "",
+        "first_publish_date": str(out_df[date_col_name].iloc[0]) if len(out_df) > 0 and schedule_publish_dates else "",
+        "last_publish_date": str(out_df[date_col_name].iloc[-1]) if len(out_df) > 0 and schedule_publish_dates else "",
         "missing_mandatory_fields": {
-            "Title": int(out_df["Title"].isna().sum()),
-            "Media URL": int(out_df["Media URL"].isna().sum()),
-            "Pinterest Board": int(out_df["Pinterest Board"].isna().sum()),
-            "Description": int(out_df["Description"].isna().sum()),
-            "Link": int(out_df["Link"].isna().sum()),
+            "Title": int(title_series.isna().sum()),
+            "Description": int(desc_series.isna().sum()),
         },
         "sample_rows": out_df.head(5).to_dict(orient="records"),
     }

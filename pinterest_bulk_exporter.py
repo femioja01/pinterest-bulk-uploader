@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Pinterest Bulk Pin Exporter CLI
-Converts Master CSV files into Pinterest Official Bulk CSV format with:
+Pinterest & Publer Bulk Pin Exporter CLI
+Converts Master CSV files into Pinterest Official or Publer Bulk CSV format with:
+- Target template selection (Pinterest 8-col vs Publer 12-col)
 - Week filtering (e.g. Weeks 2-5 or specific weeks)
 - Natural numerical week ordering (Week 1, Week 2, ...)
 - Intelligent description trimming to strictly <= 500 characters
 - Title length verification (<= 100 characters)
-- Automated Publish Date scheduling (ISO-8601 timestamps)
+- Automated Publish Date scheduling (ISO-8601 or Standard timestamps)
 """
 
 import argparse
@@ -16,10 +17,17 @@ from src.services.formatter import format_master_csv
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Format master pin CSV into Pinterest Official Bulk Upload format."
+        description="Format master pin CSV into Pinterest Official or Publer Bulk Upload format."
     )
     parser.add_argument("-i", "--input", required=True, help="Path to Master CSV input file")
     parser.add_argument("-o", "--output", required=True, help="Path to Output CSV file")
+    parser.add_argument(
+        "-t",
+        "--template",
+        choices=["pinterest", "publer"],
+        default="pinterest",
+        help="Target export template: 'pinterest' (8 columns) or 'publer' (12 columns)",
+    )
     parser.add_argument(
         "--start-week",
         type=int,
@@ -67,8 +75,10 @@ def main():
         specific_weeks = [int(w.strip()) for w in args.weeks.split(",") if w.strip().isdigit()]
 
     print(f"[+] Reading Master CSV: {input_path}")
+    print(f"[+] Target Template: {args.template.upper()}")
     out_df, qa = format_master_csv(
         input_path,
+        target_template=args.template,
         start_week=args.start_week,
         end_week=args.end_week,
         specific_weeks=specific_weeks,
@@ -82,6 +92,7 @@ def main():
     out_df.to_csv(output_path, index=False, encoding="utf-8-sig")
 
     print("\n--- QA Verification ---")
+    print(f"Target Template: {qa['target_template'].upper()}")
     print(f"Total raw rows: {qa['total_raw_rows']}")
     print(f"Total output pins: {qa['total_output_pins']}")
     print(f"Max Title Length: {qa['max_title_length']} (Limit: 100)")
