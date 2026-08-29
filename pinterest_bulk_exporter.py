@@ -6,6 +6,7 @@ Converts Master CSV files into Pinterest Official Bulk CSV format with:
 - Natural numerical week ordering (Week 1, Week 2, ...)
 - Intelligent description trimming to strictly <= 500 characters
 - Title length verification (<= 100 characters)
+- Automated Publish Date scheduling (ISO-8601 timestamps)
 """
 
 import argparse
@@ -37,6 +38,23 @@ def main():
         default=None,
         help="Comma-separated specific week numbers (e.g. 1,3,5)",
     )
+    parser.add_argument(
+        "--schedule",
+        action="store_true",
+        help="Automatically generate and populate Publish Dates for all pins",
+    )
+    parser.add_argument(
+        "--publish-start-date",
+        type=str,
+        default=None,
+        help="Publishing start date (YYYY-MM-DD, default tomorrow)",
+    )
+    parser.add_argument(
+        "--pins-per-day",
+        type=int,
+        default=25,
+        help="Number of pins to schedule per day (default: 25)",
+    )
 
     args = parser.parse_args()
     input_path = Path(args.input)
@@ -54,6 +72,9 @@ def main():
         start_week=args.start_week,
         end_week=args.end_week,
         specific_weeks=specific_weeks,
+        schedule_publish_dates=args.schedule,
+        publish_start_date=args.publish_start_date,
+        publish_pins_per_day=args.pins_per_day,
     )
 
     output_path = Path(args.output)
@@ -67,6 +88,8 @@ def main():
     print(f"Titles > 100 chars: {qa['titles_over_100']}")
     print(f"Max Description Length: {qa['max_desc_length']} (Limit: 500)")
     print(f"Descriptions > 500 chars: {qa['descriptions_over_500']}")
+    if qa.get("has_publish_dates"):
+        print(f"Publish Dates Generated: {qa['first_publish_date']} -> {qa['last_publish_date']}")
     print(f"Missing values in mandatory fields: {qa['missing_mandatory_fields']}")
     print(f"\n[✓] Successfully generated: {output_path}")
 

@@ -143,11 +143,68 @@ def inspect_master_csv(file_bytes_or_path: bytes | Path | str) -> dict:
     }
 
 
+from datetime import datetime, date, time, timedelta
+
+
+def generate_pin_publish_dates(
+    total_pins: int,
+    start_date_str: str,
+    pins_per_day: int = 25,
+    daily_start: str = "08:00",
+    daily_end: str = "22:00",
+) -> list[str]:
+    """Generates ISO-8601 publish dates formatted as YYYY-MM-DDTHH:MM:SS for all pins."""
+    try:
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+    except Exception:
+        start_date = (datetime.now() + timedelta(days=1)).date()
+
+    try:
+        s_h, s_m = map(int, daily_start.split(":"))
+        e_h, e_m = map(int, daily_end.split(":"))
+    except Exception:
+        s_h, s_m = 8, 0
+        e_h, e_m = 22, 0
+
+    start_seconds = s_h * 3600 + s_m * 60
+    end_seconds = e_h * 3600 + e_m * 60
+    if end_seconds <= start_seconds:
+        end_seconds = start_seconds + 14 * 3600
+
+    window_duration = end_seconds - start_seconds
+
+    dates = []
+    current_day = start_date
+    generated = 0
+
+    while generated < total_pins:
+        today_pins = min(pins_per_day, total_pins - generated)
+        step_seconds = window_duration / (today_pins - 1) if today_pins > 1 else 0
+
+        for i in range(today_pins):
+            sec_offset = int(start_seconds + i * step_seconds)
+            h = (sec_offset // 3600) % 24
+            m = (sec_offset % 3600) // 60
+            s = sec_offset % 60
+            dt = datetime.combine(current_day, time(hour=h, minute=m, second=s))
+            dates.append(dt.strftime("%Y-%m-%dT%H:%M:%S"))
+            generated += 1
+
+        current_day += timedelta(days=1)
+
+    return dates
+
+
 def format_master_csv(
     file_bytes_or_path: bytes | Path | str,
     start_week: int | None = None,
     end_week: int | None = None,
     specific_weeks: list[int] | None = None,
+    schedule_publish_dates: bool = False,
+    publish_start_date: str | None = None,
+    publish_pins_per_day: int = 25,
+    publish_daily_start: str = "08:00",
+    publish_daily_end: str = "22:00",
 ) -> tuple[pd.DataFrame, dict]:
     """Formats a Master CSV into Pinterest's Official Bulk Upload format."""
     if isinstance(file_bytes_or_path, bytes):
@@ -213,6 +270,19 @@ def format_master_csv(
     # Drop any completely empty rows
     out_df = out_df.dropna(subset=["Title", "Media URL", "Pinterest Board"]).reset_index(drop=True)
 
+    # Automatically generate and populate Publish Dates if requested
+    if schedule_publish_dates and len(out_df) > 0:
+        if not publish_start_date:
+            publish_start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        pub_dates = generate_pin_publish_dates(
+            total_pins=len(out_df),
+            start_date_str=publish_start_date,
+            pins_per_day=publish_pins_per_day,
+            daily_start=publish_daily_start,
+            daily_end=publish_daily_end,
+        )
+        out_df["Publish Date"] = pub_dates
+
     # QA Verification Stats
     desc_lens = out_df["Description"].astype(str).str.len()
     title_lens = out_df["Title"].astype(str).str.len()
@@ -224,6 +294,9 @@ def format_master_csv(
         "titles_over_100": int((title_lens > 100).sum()),
         "max_desc_length": int(desc_lens.max()) if len(desc_lens) > 0 else 0,
         "descriptions_over_500": int((desc_lens > 500).sum()),
+        "has_publish_dates": schedule_publish_dates,
+        "first_publish_date": str(out_df["Publish Date"].iloc[0]) if len(out_df) > 0 and schedule_publish_dates else "",
+        "last_publish_date": str(out_df["Publish Date"].iloc[-1]) if len(out_df) > 0 and schedule_publish_dates else "",
         "missing_mandatory_fields": {
             "Title": int(out_df["Title"].isna().sum()),
             "Media URL": int(out_df["Media URL"].isna().sum()),
@@ -235,3 +308,4 @@ def format_master_csv(
     }
 
     return out_df, qa_report
+

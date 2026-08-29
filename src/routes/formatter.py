@@ -2,21 +2,23 @@
 
 Provides endpoints to:
 1. Inspect master pin spreadsheets
-2. Format & download Pinterest Official Bulk CSVs
+2. Format & download Pinterest Official Bulk CSVs with automated Publish Dates
 3. Format & send directly to Account upload queues
 """
 
 import io
+import re
+import csv
 import shutil
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from src.models.database import get_session_factory, Account, Batch, BatchStatus, ActivityLog
 from src.config import ensure_account_dirs
-from src.services.splitter import split_csv
+from src.services.splitter import split_csv, detect_delimiter
 from src.services.formatter import inspect_master_csv, format_master_csv
 
 logger = logging.getLogger(__name__)
@@ -32,12 +34,14 @@ async def formatter_page(request: Request):
         accounts = session.query(Account).filter(Account.enabled == True).all()
         account_list = [{"id": a.id, "name": a.name, "batch_size": a.batch_size} for a in accounts]
 
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     return templates.TemplateResponse(
         request,
         "formatter.html",
         {
             "active_page": "formatter",
             "accounts": account_list,
+            "default_start_date": tomorrow,
         },
     )
 
@@ -60,6 +64,11 @@ async def convert_csv_endpoint(
     start_week: str = Form(""),
     end_week: str = Form(""),
     specific_weeks: str = Form(""),
+    schedule_publish_dates: bool = Form(False),
+    publish_start_date: str = Form(""),
+    publish_pins_per_day: int = Form(25),
+    publish_daily_start: str = Form("08:00"),
+    publish_daily_end: str = Form("22:00"),
 ):
     """Format master CSV into Official Pinterest Bulk CSV format and return as download."""
     try:
@@ -76,13 +85,17 @@ async def convert_csv_endpoint(
             start_week=s_week,
             end_week=e_week,
             specific_weeks=spec_weeks,
+            schedule_publish_dates=schedule_publish_dates,
+            publish_start_date=publish_start_date,
+            publish_pins_per_day=publish_pins_per_day,
+            publish_daily_start=publish_daily_start,
+            publish_daily_end=publish_daily_end,
         )
 
         output = io.StringIO()
         out_df.to_csv(output, index=False)
         csv_bytes = output.getvalue().encode("utf-8-sig")
 
-        # Generate descriptive output filename
         orig_name = file.filename or "master_pins.csv"
         clean_base = orig_name.rsplit(".", 1)[0]
         if spec_weeks:
@@ -95,6 +108,9 @@ async def convert_csv_endpoint(
             week_tag = f"_Up_to_Week{e_week}"
         else:
             week_tag = "_Official_Bulk"
+
+        if schedule_publish_dates:
+            week_tag += "_Scheduled"
 
         out_filename = f"{clean_base}{week_tag}_Pinterest.csv"
 
@@ -116,6 +132,11 @@ async def convert_and_queue_endpoint(
     start_week: str = Form(""),
     end_week: str = Form(""),
     specific_weeks: str = Form(""),
+    schedule_publish_dates: bool = Form(False),
+    publish_start_date: str = Form(""),
+    publish_pins_per_day: int = Form(25),
+    publish_daily_start: str = Form("08:00"),
+    publish_daily_end: str = Form("22:00"),
 ):
     """Format master CSV and immediately split & queue for an account."""
     factory = get_session_factory()
@@ -139,6 +160,11 @@ async def convert_and_queue_endpoint(
             start_week=s_week,
             end_week=e_week,
             specific_weeks=spec_weeks,
+            schedule_publish_dates=schedule_publish_dates,
+            publish_start_date=publish_start_date,
+            publish_pins_per_day=publish_pins_per_day,
+            publish_daily_start=publish_daily_start,
+            publish_daily_end=publish_daily_end,
         )
 
         dirs = ensure_account_dirs(account_name)
@@ -157,25 +183,50 @@ async def convert_and_queue_endpoint(
         done_master = dirs["done"] / formatted_master_filename
         shutil.move(str(master_path), str(done_master))
 
-        # Insert records into DB
+        # Insert records into DB with accurate pin counts and scheduled upload times
         with factory() as session:
             account = session.query(Account).filter(Account.name == account_name).first()
             for bf in batch_files:
+                pin_count = 0
+                first_publish_date_str = None
+                delim = detect_delimiter(bf)
                 with open(bf, "r", encoding="utf-8-sig") as f:
-                    pin_count = sum(1 for line in f if line.strip()) - 1
+                    reader = csv.reader(f, delimiter=delim)
+                    hdr = next(reader, None)
+                    pub_idx = hdr.index("Publish Date") if hdr and "Publish Date" in hdr else -1
+                    for row in reader:
+                        if any(cell.strip() for cell in row):
+                            pin_count += 1
+                            if first_publish_date_str is None and pub_idx >= 0 and len(row) > pub_idx:
+                                val = row[pub_idx].strip()
+                                if val:
+                                    first_publish_date_str = val
+
+                # If publish date exists on the pin, set batch upload time to upload prior to that date
+                batch_upload_at = None
+                if first_publish_date_str:
+                    try:
+                        # e.g. 2026-08-30T08:00:00 -> scheduled upload at 08:00 AM on that day
+                        p_dt = datetime.strptime(first_publish_date_str.split("T")[0], "%Y-%m-%d")
+                        batch_upload_at = p_dt.replace(hour=8, minute=0, second=0)
+                    except Exception:
+                        pass
+
                 batch = Batch(
                     account_id=account.id,
                     filename=bf.name,
                     original_filename=file.filename,
                     pin_count=max(0, pin_count),
                     status=BatchStatus.PENDING,
+                    scheduled_upload_at=batch_upload_at,
                 )
                 session.add(batch)
 
+            sched_info = " (with auto-generated publish dates)" if schedule_publish_dates else ""
             log = ActivityLog(
                 account_id=account.id,
                 event_type="formatted_queue",
-                message=f"Formatted & queued {file.filename} -> {len(batch_files)} batches ({len(out_df)} pins)",
+                message=f"Formatted & queued {file.filename}{sched_info} -> {len(batch_files)} batches ({len(out_df)} pins)",
             )
             session.add(log)
             session.commit()

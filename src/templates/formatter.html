@@ -6,12 +6,12 @@
     <div>
         <h1 style="margin-bottom: 4px;">✨ Pinterest Bulk CSV Formatter</h1>
         <p class="text-muted" style="margin: 0; font-size: 0.9rem;">
-            Convert raw Master Pin spreadsheets into Pinterest's Official 8-Column Bulk Upload format with natural week ordering and intelligent description trimming.
+            Convert raw Master Pin spreadsheets into Pinterest's Official 8-Column Bulk Upload format with natural week ordering, intelligent description trimming, and auto-generated publish schedules.
         </p>
     </div>
 </div>
 
-<div class="formatter-grid" style="display: grid; grid-template-columns: minmax(350px, 440px) 1fr; gap: 24px; align-items: start;">
+<div class="formatter-grid" style="display: grid; grid-template-columns: minmax(360px, 460px) 1fr; gap: 24px; align-items: start;">
     
     <!-- LEFT PANEL: FILE UPLOAD & CONTROLS -->
     <div class="card" style="border: 1px solid var(--border-color); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
@@ -24,7 +24,7 @@
             <form id="formatter-form" onsubmit="event.preventDefault();">
                 
                 <!-- Dropzone Area -->
-                <div class="drop-zone" id="master-dropzone" style="border: 2px dashed #cbd5e1; border-radius: 10px; padding: 28px 16px; text-align: center; background: #f8fafc; cursor: pointer; transition: all 0.2s ease;">
+                <div class="drop-zone" id="master-dropzone" style="border: 2px dashed #cbd5e1; border-radius: 10px; padding: 26px 16px; text-align: center; background: #f8fafc; cursor: pointer; transition: all 0.2s ease;">
                     <div style="font-size: 2.2rem; margin-bottom: 8px;">📊</div>
                     <strong style="font-size: 0.95rem; color: var(--text-dark); display: block;" id="dropzone-label">
                         Drag & Drop Master CSV or Click to Browse
@@ -61,8 +61,8 @@
                     </label>
 
                     <div style="display: flex; flex-direction: column; gap: 8px;">
-                        <!-- Option 1: All Weeks (Chronological Week 1 -> Week N) -->
-                        <label style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #ffffff; cursor: pointer;" id="label-week-all">
+                        <!-- Option 1: All Weeks -->
+                        <label style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #ffffff; cursor: pointer;">
                             <input type="radio" name="week_mode" value="all" checked onchange="onWeekModeChange('all')">
                             <div>
                                 <strong style="font-size: 0.88rem; color: var(--text-dark);">All Weeks (Full File)</strong>
@@ -71,7 +71,7 @@
                         </label>
 
                         <!-- Option 2: Week Range -->
-                        <label style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #ffffff; cursor: pointer;" id="label-week-range">
+                        <label style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #ffffff; cursor: pointer;">
                             <input type="radio" name="week_mode" value="range" onchange="onWeekModeChange('range')" style="margin-top: 4px;">
                             <div style="flex: 1;">
                                 <strong style="font-size: 0.88rem; color: var(--text-dark);">Week Range (e.g. Weeks 2 to 5)</strong>
@@ -88,8 +88,8 @@
                             </div>
                         </label>
 
-                        <!-- Option 3: Specific Detected Weeks Selection -->
-                        <label style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #ffffff; cursor: pointer;" id="label-week-specific">
+                        <!-- Option 3: Specific Detected Weeks -->
+                        <label style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: #ffffff; cursor: pointer;">
                             <input type="radio" name="week_mode" value="specific" onchange="onWeekModeChange('specific')" style="margin-top: 4px;">
                             <div style="flex: 1;">
                                 <strong style="font-size: 0.88rem; color: var(--text-dark);">Select Specific Weeks</strong>
@@ -99,11 +99,59 @@
                     </div>
                 </div>
 
-                <!-- Account Direct Queue Option (Collapsible) -->
-                <div id="queue-destination-section" style="display: none; margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 16px;">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 10px;">
+                <!-- Auto-Schedule Publish Dates Section -->
+                <div id="schedule-dates-section" style="display: none; margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 8px;">
+                        <input type="checkbox" id="chk-auto-schedule" checked onchange="toggleAutoScheduleOptions()">
+                        <strong style="font-size: 0.9rem; color: var(--primary);">🗓️ Auto-Generate Pin Publish Dates</strong>
+                    </label>
+                    <p class="text-muted" style="font-size: 0.76rem; margin: 0 0 12px 24px;">
+                        Automatically populates the <code>Publish Date</code> column with evenly spaced ISO timestamps.
+                    </p>
+
+                    <div id="auto-schedule-fields" style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
+                        <!-- Start Date -->
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="publish_start_date" style="font-size: 0.8rem; font-weight: 600;">Publishing Start Date:</label>
+                            <input type="date" id="publish_start_date" class="form-input" value="{{ default_start_date }}" style="width: 100%; margin-top: 4px; padding: 6px 10px; font-size: 0.88rem;" onchange="updateActionPreview()">
+                            <div class="d-flex gap-1" style="margin-top: 6px;">
+                                <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="setPublishDatePreset(0)">Today</button>
+                                <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="setPublishDatePreset(1)">Tomorrow</button>
+                                <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="setPublishDateNextMonday()">Next Monday</button>
+                            </div>
+                        </div>
+
+                        <!-- Pins per Day -->
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="publish_pins_per_day" style="font-size: 0.8rem; font-weight: 600;">Pins to Publish per Day:</label>
+                            <input type="number" id="publish_pins_per_day" class="form-input" min="1" max="1000" value="25" style="width: 100%; margin-top: 4px; padding: 6px 10px; font-size: 0.88rem;" oninput="updateActionPreview()">
+                            <div class="d-flex gap-1" style="margin-top: 6px;">
+                                <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="setPublishPinsPerDay(10)">10/day</button>
+                                <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="setPublishPinsPerDay(25)">25/day</button>
+                                <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="setPublishPinsPerDay(50)">50/day</button>
+                                <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 7px;" onclick="setPublishPinsPerDay(100)">100/day</button>
+                            </div>
+                        </div>
+
+                        <!-- Daily Time Window -->
+                        <div class="d-flex gap-2">
+                            <div style="flex: 1;">
+                                <label for="publish_daily_start" style="font-size: 0.74rem; color: var(--text-muted); display: block;">First Daily Pin</label>
+                                <input type="time" id="publish_daily_start" class="form-input" value="08:00" style="padding: 4px 8px; font-size: 0.82rem;" onchange="updateActionPreview()">
+                            </div>
+                            <div style="flex: 1;">
+                                <label for="publish_daily_end" style="font-size: 0.74rem; color: var(--text-muted); display: block;">Last Daily Pin</label>
+                                <input type="time" id="publish_daily_end" class="form-input" value="22:00" style="padding: 4px 8px; font-size: 0.82rem;" onchange="updateActionPreview()">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Account Direct Queue Option -->
+                <div id="queue-destination-section" style="display: none; margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 8px;">
                         <input type="checkbox" id="chk-direct-queue" onchange="toggleDirectQueueOptions()">
-                        <strong style="font-size: 0.88rem; color: var(--primary);">📤 Also Send Directly to Account Queue</strong>
+                        <strong style="font-size: 0.88rem; color: var(--primary);">📤 Send Directly to Account Upload Queue</strong>
                     </label>
 
                     <div id="direct-queue-fields" style="display: none; background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
@@ -123,7 +171,7 @@
                 </div>
 
                 <!-- Action Button -->
-                <div style="margin-top: 24px;">
+                <div style="margin-top: 22px;">
                     <button type="button" class="btn btn-primary btn-block" id="btn-process" disabled onclick="executeFormatting()" style="padding: 12px; font-size: 1rem; font-weight: 600; width: 100%; box-shadow: 0 4px 6px -1px rgba(59,130,246,0.3);">
                         ✨ Convert to Official Pinterest CSV
                     </button>
@@ -164,12 +212,12 @@
                 <div style="font-size: 1.15rem; font-weight: 700; color: var(--success);" id="stat-qa-desc">≤ 500</div>
             </div>
             <div style="background: #ffffff; padding: 12px 16px;">
-                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Missing Fields</div>
-                <div style="font-size: 1.15rem; font-weight: 700; color: var(--success);" id="stat-qa-missing">0</div>
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Publish Dates</div>
+                <div style="font-size: 0.95rem; font-weight: 700; color: var(--primary);" id="stat-qa-publish">Auto (ISO)</div>
             </div>
         </div>
 
-        <!-- Preview & Educational Content Area -->
+        <!-- Preview & Output Area -->
         <div class="card-body" style="padding: 20px; flex: 1; display: flex; flex-direction: column;">
             
             <!-- Empty Placeholder -->
@@ -177,7 +225,7 @@
                 <span class="icon" style="font-size: 3.2rem; display: block; margin-bottom: 12px;">📑</span>
                 <h3 style="margin-bottom: 6px; color: var(--text-dark);">No CSV Loaded</h3>
                 <p class="text-muted" style="max-width: 440px; margin: 0 auto;">
-                    Upload any master spreadsheet on the left. The formatter will automatically detect weeks, trim descriptions to sentence boundaries (≤ 500 chars), and format columns to match Pinterest's official bulk template.
+                    Upload any master spreadsheet on the left. The formatter will automatically sort weeks naturally (Week 1 → Week N), trim descriptions to sentence boundaries (≤ 500 chars), and auto-generate publish dates.
                 </p>
             </div>
 
@@ -187,7 +235,7 @@
                     <strong style="font-size: 0.88rem; color: var(--text-dark);">Sample Formatted Output (First 5 Pins):</strong>
                     <span class="status-badge badge-success" style="font-size: 0.72rem;">8 Official Columns Ready</span>
                 </div>
-                <div class="table-container" style="max-height: 380px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px;">
+                <div class="table-container" style="max-height: 420px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px;">
                     <table class="data-table" style="font-size: 0.8rem; margin: 0;">
                         <thead>
                             <tr style="background: #f1f5f9; position: sticky; top: 0; z-index: 10;">
@@ -195,6 +243,7 @@
                                 <th>Media URL</th>
                                 <th>Pinterest Board</th>
                                 <th>Description (≤500)</th>
+                                <th>Publish Date</th>
                                 <th>Link</th>
                             </tr>
                         </thead>
@@ -238,6 +287,33 @@
             }
         });
     });
+
+    function setPublishDatePreset(daysFromToday) {
+        const d = new Date();
+        d.setDate(d.getDate() + daysFromToday);
+        document.getElementById('publish_start_date').value = d.toISOString().substring(0, 10);
+        updateActionPreview();
+    }
+
+    function setPublishDateNextMonday() {
+        const d = new Date();
+        const day = d.getDay();
+        const diff = d.getDate() + ((7 - day + 1) % 7 || 7);
+        d.setDate(diff);
+        document.getElementById('publish_start_date').value = d.toISOString().substring(0, 10);
+        updateActionPreview();
+    }
+
+    function setPublishPinsPerDay(qty) {
+        document.getElementById('publish_pins_per_day').value = qty;
+        updateActionPreview();
+    }
+
+    function toggleAutoScheduleOptions() {
+        const isChecked = document.getElementById('chk-auto-schedule').checked;
+        document.getElementById('auto-schedule-fields').style.display = isChecked ? 'block' : 'none';
+        updateActionPreview();
+    }
 
     function handleFileSelected(file) {
         if (!file || !file.name.endsWith('.csv')) {
@@ -307,6 +383,7 @@
                 document.getElementById('week-filter-section').style.display = 'none';
             }
 
+            document.getElementById('schedule-dates-section').style.display = 'block';
             document.getElementById('queue-destination-section').style.display = 'block';
             document.getElementById('btn-process').disabled = false;
 
@@ -352,7 +429,9 @@
         document.getElementById('stat-qa-total').textContent = masterInspectionData.total_rows;
         document.getElementById('stat-qa-title').textContent = '≤ 100 chars';
         document.getElementById('stat-qa-desc').textContent = '≤ 500 chars';
-        document.getElementById('stat-qa-missing').textContent = '0';
+        const isSchedule = document.getElementById('chk-auto-schedule').checked;
+        const pinsPerDay = document.getElementById('publish_pins_per_day').value || 25;
+        document.getElementById('stat-qa-publish').textContent = isSchedule ? `${pinsPerDay}/day (ISO)` : 'Blank';
     }
 
     function executeFormatting() {
@@ -362,6 +441,7 @@
         }
 
         const isDirectQueue = document.getElementById('chk-direct-queue').checked;
+        const isAutoSchedule = document.getElementById('chk-auto-schedule').checked;
         const weekMode = document.querySelector('input[name="week_mode"]:checked')?.value || 'all';
 
         let startWeek = '';
@@ -384,6 +464,11 @@
         formData.append('start_week', startWeek);
         formData.append('end_week', endWeek);
         formData.append('specific_weeks', specificWeeks);
+        formData.append('schedule_publish_dates', isAutoSchedule);
+        formData.append('publish_start_date', document.getElementById('publish_start_date').value);
+        formData.append('publish_pins_per_day', document.getElementById('publish_pins_per_day').value);
+        formData.append('publish_daily_start', document.getElementById('publish_daily_start').value);
+        formData.append('publish_daily_end', document.getElementById('publish_daily_end').value);
 
         if (isDirectQueue) {
             formData.append('account_id', document.getElementById('queue-account-id').value);
@@ -425,7 +510,6 @@
                     return;
                 }
 
-                // Extract filename from header
                 const disposition = res.headers.get('Content-Disposition');
                 let filename = 'Official_Pinterest_Bulk_Pins.csv';
                 if (disposition && disposition.includes('filename=')) {
@@ -467,7 +551,8 @@
                 <td style="font-weight: 600; color: var(--text-dark); max-width: 180px;">${row.Title}</td>
                 <td><a href="${row['Media URL']}" target="_blank" style="font-size: 0.72rem; color: var(--primary);">View Media</a></td>
                 <td><span class="status-badge badge-pending" style="font-size: 0.72rem;">${row['Pinterest Board']}</span></td>
-                <td style="font-size: 0.75rem; color: var(--text-muted); max-width: 250px; line-height: 1.4;">${row.Description}</td>
+                <td style="font-size: 0.75rem; color: var(--text-muted); max-width: 240px; line-height: 1.4;">${row.Description}</td>
+                <td style="font-size: 0.75rem; font-family: monospace; color: var(--primary);">${row['Publish Date'] || '-'}</td>
                 <td><a href="${row.Link}" target="_blank" style="font-size: 0.72rem; color: var(--primary);">Article Link</a></td>
             `;
             tbody.appendChild(tr);
