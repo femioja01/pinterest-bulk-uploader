@@ -645,6 +645,64 @@ async def download_batch(batch_id: int):
     return JSONResponse({"error": "File not found on disk"}, status_code=404)
 
 
+@router.get("/api/history/{batch_id}/preview", response_class=JSONResponse)
+async def preview_batch(batch_id: int):
+    factory = get_session_factory()
+    with factory() as session:
+        batch = session.query(Batch).filter(Batch.id == batch_id).first()
+        if not batch:
+            return JSONResponse({"error": "Batch not found"}, status_code=404)
+
+        account = session.query(Account).filter(Account.id == batch.account_id).first()
+        if not account:
+            return JSONResponse({"error": "Account not found"}, status_code=404)
+
+        batch_filename = str(batch.filename)
+        found_filepath = None
+        for subdir in ["queue", "done", "failed"]:
+            fp = get_account_dir(account.name) / subdir / batch_filename
+            if fp.exists():
+                found_filepath = fp
+                break
+
+        if not found_filepath:
+            return JSONResponse({"error": f"CSV file '{batch_filename}' not found on server disk"}, status_code=404)
+
+        # Read CSV file
+        try:
+            with open(found_filepath, "r", encoding="utf-8-sig", errors="replace") as f:
+                raw_csv = f.read()
+
+            delim = detect_delimiter(found_filepath)
+            reader = csv.DictReader(io.StringIO(raw_csv), delimiter=delim)
+            headers = [h.strip() for h in (reader.fieldnames or [])]
+            rows = []
+            for row in reader:
+                clean_row = {k.strip(): (v.strip() if v else "") for k, v in row.items() if k}
+                if any(clean_row.values()):
+                    rows.append(clean_row)
+
+            sched_time = batch.scheduled_upload_at.strftime("%Y-%m-%d %H:%M") if batch.scheduled_upload_at else ""
+
+            return {
+                "success": True,
+                "batch_id": batch.id,
+                "filename": batch_filename,
+                "original_filename": batch.original_filename or "",
+                "account_name": account.name,
+                "status": batch.status.value if batch.status else "unknown",
+                "scheduled_upload_at": sched_time,
+                "pin_count": len(rows),
+                "columns": headers,
+                "rows": rows,
+                "raw_csv": raw_csv,
+            }
+        except Exception as e:
+            logger.error(f"Error previewing batch {batch_id}: {e}")
+            return JSONResponse({"error": f"Failed to read CSV: {str(e)}"}, status_code=500)
+
+
+
 @router.get("/api/history/download-master")
 async def download_master_csv(
     account_id: int = Query(...),

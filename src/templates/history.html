@@ -253,6 +253,7 @@
                                     <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Retry uploading this batch now">🚀 Upload Now</button>
                                     <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
                                     {% endif %}
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openBatchPreview({{ batch.id }})" title="Preview and copy data from this batch">👁️ Preview</button>
                                     <a href="/api/history/{{ batch.id }}/download" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();" title="Download this split batch CSV">Download</a>
                                 </div>
                             </td>
@@ -343,7 +344,10 @@
                                 </div>
                             </td>
                             <td style="padding-right: 24px;">
-                                <a href="/api/history/{{ batch.id }}/download" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();" title="Download this split batch CSV">Download CSV</a>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openBatchPreview({{ batch.id }})" title="Preview and copy data from this batch">👁️ Preview</button>
+                                    <a href="/api/history/{{ batch.id }}/download" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();" title="Download this split batch CSV">Download CSV</a>
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
@@ -454,6 +458,7 @@
                             <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Retry uploading this batch now">🚀 Upload Now</button>
                             <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
                             {% endif %}
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openBatchPreview({{ batch.id }})" title="Preview and copy data from this batch">👁️ Preview</button>
                             <a href="/api/history/{{ batch.id }}/download" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();" title="Download this split batch CSV">Download</a>
                         </div>
                     </td>
@@ -619,6 +624,83 @@
             <button type="button" class="btn btn-primary" id="btn-save-reslice" onclick="saveReslice()" style="font-weight: 600;">
                 ✂️ Confirm & Re-slice Queue
             </button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: BATCH CSV PREVIEW & QUICK COPY -->
+<div id="modal-batch-preview" class="modal-overlay" style="display: none; position: fixed; inset: 0; width: 100%; height: 100%; background: rgba(15,23,42,0.7); z-index: 99999; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+    <div class="modal" style="background: #ffffff; border-radius: 12px; width: 94%; max-width: 1100px; max-height: 90vh; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); overflow: hidden; display: flex; flex-direction: column;">
+        <!-- Modal Header -->
+        <div class="modal-header d-flex justify-between align-center" style="padding: 16px 24px; border-bottom: 1px solid var(--border-color); background: #f8fafc; flex-shrink: 0;">
+            <div>
+                <h3 style="margin: 0; font-size: 1.15rem; color: var(--text-dark); display: flex; align-items: center; gap: 8px;">
+                    👁️ Batch Preview: <span id="preview-modal-filename" style="color: var(--primary); font-family: monospace;">batch_001.csv</span>
+                </h3>
+                <div class="text-muted" style="font-size: 0.8rem; margin-top: 3px;" id="preview-modal-meta">
+                    Account: - • 0 pins • Status: -
+                </div>
+            </div>
+            <button type="button" class="btn btn-ghost" onclick="closeBatchPreview()" style="font-size: 1.3rem; line-height: 1; padding: 4px 8px; border: none; background: transparent; cursor: pointer;">✕</button>
+        </div>
+
+        <!-- Modal Toolbar -->
+        <div style="padding: 12px 24px; background: #ffffff; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0;">
+            <!-- Search / Filter Input -->
+            <div style="flex: 1; min-width: 240px; max-width: 400px; position: relative;">
+                <input type="text" id="preview-search-input" class="form-input" placeholder="🔍 Search titles, boards, descriptions, links..." style="width: 100%; padding: 7px 12px; font-size: 0.84rem; border-radius: 6px;" oninput="filterBatchPreview(this.value)">
+            </div>
+
+            <!-- Toolbar Buttons -->
+            <div class="d-flex gap-2 align-center">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-entire-csv" onclick="copyEntireBatchCsv()" style="font-weight: 600; padding: 6px 12px; font-size: 0.82rem;">
+                    📋 Copy Entire CSV
+                </button>
+                <a id="preview-btn-download" href="#" class="btn btn-primary btn-sm" style="font-weight: 600; padding: 6px 12px; font-size: 0.82rem;">
+                    📥 Download CSV
+                </a>
+            </div>
+        </div>
+
+        <!-- Modal Table Body -->
+        <div class="modal-body" style="padding: 0; overflow-y: auto; flex: 1; position: relative;">
+            <!-- Loading Indicator -->
+            <div id="preview-loading" style="display: none; padding: 48px; text-align: center;">
+                <div style="font-size: 1.8rem; margin-bottom: 8px;">⏳</div>
+                <div style="color: var(--text-dark); font-weight: 600;">Loading batch data...</div>
+            </div>
+
+            <!-- Error Box -->
+            <div id="preview-error" style="display: none; padding: 32px; text-align: center; color: var(--danger);">
+                <div style="font-size: 1.8rem; margin-bottom: 8px;">❌</div>
+                <div id="preview-error-text" style="font-weight: 600;">Failed to load batch data.</div>
+            </div>
+
+            <!-- Table Container -->
+            <div id="preview-table-container" style="display: block;">
+                <table class="data-table" style="font-size: 0.8rem; margin: 0; width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: #f1f5f9; position: sticky; top: 0; z-index: 10; border-bottom: 2px solid var(--border-color);">
+                            <th style="width: 40px; text-align: center; padding: 10px 8px;">#</th>
+                            <th style="min-width: 220px; padding: 10px 12px;">Title</th>
+                            <th style="min-width: 110px; padding: 10px 12px;">Media</th>
+                            <th style="min-width: 120px; padding: 10px 12px;">Pinterest Board</th>
+                            <th style="min-width: 260px; padding: 10px 12px;">Description</th>
+                            <th style="min-width: 130px; padding: 10px 12px;">Publish Date</th>
+                            <th style="min-width: 120px; padding: 10px 12px;">Article Link</th>
+                        </tr>
+                    </thead>
+                    <tbody id="preview-batch-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-footer d-flex justify-between align-center" style="padding: 12px 24px; border-top: 1px solid var(--border-color); background: #f8fafc; flex-shrink: 0;">
+            <div style="font-size: 0.82rem; color: var(--text-muted);" id="preview-footer-count">
+                Showing 0 pins
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="closeBatchPreview()">Close</button>
         </div>
     </div>
 </div>
@@ -1032,6 +1114,197 @@
         });
     }
 
+    // Batch Preview Handlers
+    let currentBatchPreviewData = null;
+    let activePreviewRows = [];
+
+    function openBatchPreview(batchId) {
+        const modal = document.getElementById('modal-batch-preview');
+        if (!modal) return;
+
+        // Reset UI state
+        document.getElementById('preview-modal-filename').textContent = 'Loading...';
+        document.getElementById('preview-modal-meta').textContent = 'Fetching batch details...';
+        document.getElementById('preview-search-input').value = '';
+        document.getElementById('preview-loading').style.display = 'block';
+        document.getElementById('preview-error').style.display = 'none';
+        document.getElementById('preview-table-container').style.display = 'none';
+        document.getElementById('preview-footer-count').textContent = 'Loading...';
+
+        document.getElementById('preview-btn-download').href = `/api/history/${batchId}/download`;
+
+        modal.classList.add('active');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
+
+        fetch(`/api/history/${batchId}/preview`)
+            .then(async res => {
+                const data = await res.json().catch(() => ({ error: 'Invalid response from server' }));
+                if (!res.ok || data.error) {
+                    document.getElementById('preview-loading').style.display = 'none';
+                    document.getElementById('preview-error').style.display = 'block';
+                    document.getElementById('preview-error-text').textContent = data.error || 'Failed to load batch preview';
+                    return;
+                }
+
+                currentBatchPreviewData = data;
+                activePreviewRows = data.rows || [];
+
+                document.getElementById('preview-loading').style.display = 'none';
+                document.getElementById('preview-table-container').style.display = 'block';
+                document.getElementById('preview-modal-filename').textContent = data.filename;
+                
+                const statusBadge = data.status.toUpperCase();
+                const schedInfo = data.scheduled_upload_at ? ` • Scheduled: ${data.scheduled_upload_at}` : '';
+                document.getElementById('preview-modal-meta').textContent = `Account: ${data.account_name} • ${data.pin_count} pins • Status: ${statusBadge}${schedInfo}`;
+
+                renderBatchPreviewTable(activePreviewRows);
+            })
+            .catch(err => {
+                document.getElementById('preview-loading').style.display = 'none';
+                document.getElementById('preview-error').style.display = 'block';
+                document.getElementById('preview-error-text').textContent = `Network error loading preview: ${err.message || err}`;
+            });
+    }
+
+    function closeBatchPreview() {
+        const modal = document.getElementById('modal-batch-preview');
+        if (modal) {
+            modal.classList.remove('active');
+            modal.style.setProperty('display', 'none', 'important');
+            modal.style.setProperty('opacity', '0', 'important');
+            modal.style.setProperty('visibility', 'hidden', 'important');
+        }
+        currentBatchPreviewData = null;
+        activePreviewRows = [];
+    }
+
+    function renderBatchPreviewTable(rows) {
+        const tbody = document.getElementById('preview-batch-tbody');
+        tbody.innerHTML = '';
+
+        if (!rows || rows.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 36px; color: var(--text-muted);">No matching pins found in this batch.</td></tr>`;
+            document.getElementById('preview-footer-count').textContent = `Showing 0 pins`;
+            return;
+        }
+
+        document.getElementById('preview-footer-count').textContent = `Showing ${rows.length} of ${currentBatchPreviewData?.pin_count || rows.length} pins`;
+
+        rows.forEach((row, idx) => {
+            // Find fields flexibly
+            const title = row['Title'] || row['Title - For the video, pin, PDF ..'] || row['pin_title'] || '';
+            const mediaUrl = row['Media URL'] || row['Media URL(s) - Separated by comma'] || row['Media Link'] || '';
+            const board = row['Pinterest Board'] || row['Pin board, FB album, or Google category'] || row['board'] || '';
+            const desc = row['Description'] || row['Text'] || row['pin_description'] || '';
+            const pubDate = row['Publish Date'] || row['Date - Intl. format or prompt'] || '';
+            const link = row['Link'] || row['Link(s) - Separated by comma for FB carousels'] || row['Article Link'] || '';
+
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid var(--border-color)';
+
+            tr.innerHTML = `
+                <td style="text-align: center; color: var(--text-muted); font-size: 0.76rem; padding: 8px 6px;">${idx + 1}</td>
+                <td style="padding: 8px 12px; vertical-align: top;">
+                    <div class="d-flex justify-between align-center" style="gap: 6px;">
+                        <span style="font-weight: 600; color: var(--text-dark); word-break: break-word;">${escapeHtml(title)}</span>
+                        ${title ? `<button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 5px; font-size: 0.72rem; flex-shrink: 0;" title="Copy Title" onclick="copyCellText(${JSON.stringify(title)}, this)">📋</button>` : ''}
+                    </div>
+                </td>
+                <td style="padding: 8px 12px; vertical-align: top;">
+                    <div class="d-flex justify-between align-center" style="gap: 6px;">
+                        ${mediaUrl ? `<a href="${escapeHtml(mediaUrl)}" target="_blank" style="font-size: 0.75rem; color: var(--primary); word-break: break-all;">View Media</a>` : '<span class="text-muted">-</span>'}
+                        ${mediaUrl ? `<button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 5px; font-size: 0.72rem; flex-shrink: 0;" title="Copy Media URL" onclick="copyCellText(${JSON.stringify(mediaUrl)}, this)">📋</button>` : ''}
+                    </div>
+                </td>
+                <td style="padding: 8px 12px; vertical-align: top;">
+                    ${board ? `<span class="status-badge badge-pending" style="font-size: 0.72rem; word-break: break-word;">${escapeHtml(board)}</span>` : '<span class="text-muted">-</span>'}
+                </td>
+                <td style="padding: 8px 12px; vertical-align: top;">
+                    <div class="d-flex justify-between align-start" style="gap: 6px;">
+                        <span style="font-size: 0.76rem; color: var(--text-muted); line-height: 1.35; max-width: 320px; display: block; word-break: break-word;">${escapeHtml(desc)}</span>
+                        ${desc ? `<button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 5px; font-size: 0.72rem; flex-shrink: 0;" title="Copy Description" onclick="copyCellText(${JSON.stringify(desc)}, this)">📋</button>` : ''}
+                    </div>
+                </td>
+                <td style="padding: 8px 12px; vertical-align: top; font-family: monospace; font-size: 0.74rem; color: var(--primary); white-space: nowrap;">
+                    ${pubDate ? escapeHtml(pubDate) : '<span class="text-muted" style="font-family: inherit;">-</span>'}
+                </td>
+                <td style="padding: 8px 12px; vertical-align: top;">
+                    <div class="d-flex justify-between align-center" style="gap: 6px;">
+                        ${link ? `<a href="${escapeHtml(link)}" target="_blank" style="font-size: 0.75rem; color: var(--primary); word-break: break-all;">Link</a>` : '<span class="text-muted">-</span>'}
+                        ${link ? `<button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 5px; font-size: 0.72rem; flex-shrink: 0;" title="Copy Article URL" onclick="copyCellText(${JSON.stringify(link)}, this)">📋</button>` : ''}
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function filterBatchPreview(query) {
+        if (!currentBatchPreviewData || !currentBatchPreviewData.rows) return;
+        const q = (query || '').trim().toLowerCase();
+        if (!q) {
+            renderBatchPreviewTable(currentBatchPreviewData.rows);
+            return;
+        }
+
+        const filtered = currentBatchPreviewData.rows.filter(row => {
+            return Object.values(row).some(val => String(val || '').toLowerCase().includes(q));
+        });
+
+        renderBatchPreviewTable(filtered);
+    }
+
+    function copyCellText(text, btnEl) {
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+            if (btnEl) {
+                const orig = btnEl.textContent;
+                btnEl.textContent = '✓';
+                btnEl.style.background = '#dcfce7';
+                btnEl.style.color = '#16a34a';
+                setTimeout(() => {
+                    btnEl.textContent = orig;
+                    btnEl.style.background = '';
+                    btnEl.style.color = '';
+                }, 1200);
+            }
+            showToast('Copied to clipboard!', 'success');
+        }).catch(() => {
+            showToast('Failed to copy to clipboard', 'error');
+        });
+    }
+
+    function copyEntireBatchCsv() {
+        if (!currentBatchPreviewData || !currentBatchPreviewData.raw_csv) {
+            showToast('No CSV data available to copy', 'error');
+            return;
+        }
+
+        navigator.clipboard.writeText(currentBatchPreviewData.raw_csv).then(() => {
+            const btn = document.getElementById('btn-copy-entire-csv');
+            if (btn) {
+                const orig = btn.textContent;
+                btn.textContent = '✓ Copied Full CSV!';
+                setTimeout(() => btn.textContent = orig, 1500);
+            }
+            showToast(`✓ Copied entire ${currentBatchPreviewData.filename} to clipboard!`, 'success');
+        }).catch(() => {
+            showToast('Failed to copy CSV', 'error');
+        });
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('modal-reschedule');
         if (modal) {
@@ -1045,13 +1318,21 @@
                 if (e.target === resliceModal) closeResliceModal();
             });
         }
+        const previewModal = document.getElementById('modal-batch-preview');
+        if (previewModal) {
+            previewModal.addEventListener('click', (e) => {
+                if (e.target === previewModal) closeBatchPreview();
+            });
+        }
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeRescheduleModal();
                 closeResliceModal();
+                closeBatchPreview();
             }
         });
     });
 </script>
 {% endblock %}
+
 
