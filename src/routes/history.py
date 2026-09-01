@@ -1,5 +1,7 @@
 """Upload history routes — view, filter, retry, cancel, and manage scheduled batches and master campaigns."""
 
+import io
+import csv
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import zoneinfo
@@ -12,6 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from src.models.database import get_session_factory, get_setting, Account, Batch, BatchStatus, ActivityLog
 from src.config import get_account_dir
+from src.services.splitter import detect_delimiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
