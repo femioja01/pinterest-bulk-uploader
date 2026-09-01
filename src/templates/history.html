@@ -652,7 +652,10 @@
             </div>
 
             <!-- Toolbar Buttons -->
-            <div class="d-flex gap-2 align-center">
+            <div class="d-flex gap-3 align-center">
+                <span class="text-muted" style="font-size: 0.78rem; display: flex; align-items: center; gap: 4px;">
+                    💡 Click any cell to copy text
+                </span>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-entire-csv" onclick="copyEntireBatchCsv()" style="font-weight: 600; padding: 6px 12px; font-size: 0.82rem;">
                     📋 Copy Entire CSV
                 </button>
@@ -1194,51 +1197,137 @@
 
         rows.forEach((row, idx) => {
             // Find fields flexibly
-            const title = row['Title'] || row['Title - For the video, pin, PDF ..'] || row['pin_title'] || '';
-            const mediaUrl = row['Media URL'] || row['Media URL(s) - Separated by comma'] || row['Media Link'] || '';
-            const board = row['Pinterest Board'] || row['Pin board, FB album, or Google category'] || row['board'] || '';
-            const desc = row['Description'] || row['Text'] || row['pin_description'] || '';
-            const pubDate = row['Publish Date'] || row['Date - Intl. format or prompt'] || '';
-            const link = row['Link'] || row['Link(s) - Separated by comma for FB carousels'] || row['Article Link'] || '';
+            const title = (row['Title'] || row['Title - For the video, pin, PDF ..'] || row['pin_title'] || '').trim();
+            const mediaUrl = (row['Media URL'] || row['Media URL(s) - Separated by comma'] || row['Media Link'] || '').trim();
+            const board = (row['Pinterest Board'] || row['Pin board, FB album, or Google category'] || row['board'] || '').trim();
+            const desc = (row['Description'] || row['Text'] || row['pin_description'] || '').trim();
+            const pubDate = (row['Publish Date'] || row['Date - Intl. format or prompt'] || '').trim();
+            const link = (row['Link'] || row['Link(s) - Separated by comma for FB carousels'] || row['Article Link'] || '').trim();
 
             const tr = document.createElement('tr');
             tr.style.borderBottom = '1px solid var(--border-color)';
 
-            tr.innerHTML = `
-                <td style="text-align: center; color: var(--text-muted); font-size: 0.76rem; padding: 8px 6px;">${idx + 1}</td>
-                <td style="padding: 8px 12px; vertical-align: top;">
-                    <div class="d-flex justify-between align-center" style="gap: 6px;">
-                        <span style="font-weight: 600; color: var(--text-dark); word-break: break-word;">${escapeHtml(title)}</span>
-                        ${title ? `<button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 5px; font-size: 0.72rem; flex-shrink: 0;" title="Copy Title" onclick="copyCellText(${JSON.stringify(title)}, this)">📋</button>` : ''}
-                    </div>
-                </td>
-                <td style="padding: 8px 12px; vertical-align: top;">
-                    <div class="d-flex justify-between align-center" style="gap: 6px;">
-                        ${mediaUrl ? `<a href="${escapeHtml(mediaUrl)}" target="_blank" style="font-size: 0.75rem; color: var(--primary); word-break: break-all;">View Media</a>` : '<span class="text-muted">-</span>'}
-                        ${mediaUrl ? `<button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 5px; font-size: 0.72rem; flex-shrink: 0;" title="Copy Media URL" onclick="copyCellText(${JSON.stringify(mediaUrl)}, this)">📋</button>` : ''}
-                    </div>
-                </td>
-                <td style="padding: 8px 12px; vertical-align: top;">
-                    ${board ? `<span class="status-badge badge-pending" style="font-size: 0.72rem; word-break: break-word;">${escapeHtml(board)}</span>` : '<span class="text-muted">-</span>'}
-                </td>
-                <td style="padding: 8px 12px; vertical-align: top;">
-                    <div class="d-flex justify-between align-start" style="gap: 6px;">
-                        <span style="font-size: 0.76rem; color: var(--text-muted); line-height: 1.35; max-width: 320px; display: block; word-break: break-word;">${escapeHtml(desc)}</span>
-                        ${desc ? `<button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 5px; font-size: 0.72rem; flex-shrink: 0;" title="Copy Description" onclick="copyCellText(${JSON.stringify(desc)}, this)">📋</button>` : ''}
-                    </div>
-                </td>
-                <td style="padding: 8px 12px; vertical-align: top; font-family: monospace; font-size: 0.74rem; color: var(--primary); white-space: nowrap;">
-                    ${pubDate ? escapeHtml(pubDate) : '<span class="text-muted" style="font-family: inherit;">-</span>'}
-                </td>
-                <td style="padding: 8px 12px; vertical-align: top;">
-                    <div class="d-flex justify-between align-center" style="gap: 6px;">
-                        ${link ? `<a href="${escapeHtml(link)}" target="_blank" style="font-size: 0.75rem; color: var(--primary); word-break: break-all;">Link</a>` : '<span class="text-muted">-</span>'}
-                        ${link ? `<button type="button" class="btn btn-secondary btn-sm" style="padding: 2px 5px; font-size: 0.72rem; flex-shrink: 0;" title="Copy Article URL" onclick="copyCellText(${JSON.stringify(link)}, this)">📋</button>` : ''}
-                    </div>
-                </td>
-            `;
+            // Row index
+            const tdIdx = document.createElement('td');
+            tdIdx.style.cssText = 'text-align: center; color: var(--text-muted); font-size: 0.76rem; padding: 10px 6px;';
+            tdIdx.textContent = idx + 1;
+            tr.appendChild(tdIdx);
+
+            // Title cell
+            const tdTitle = createCopyCell(title, `<span style="font-weight: 600; color: var(--text-dark); word-break: break-word;">${escapeHtml(title) || '<span class="text-muted">-</span>'}</span>`);
+            tr.appendChild(tdTitle);
+
+            // Media URL cell
+            const mediaHtml = mediaUrl ? `
+                <div class="d-flex align-center justify-between" style="gap: 4px;">
+                    <span style="font-size: 0.75rem; color: var(--primary); word-break: break-all;">${escapeHtml(mediaUrl)}</span>
+                    <a href="${escapeHtml(mediaUrl)}" target="_blank" onclick="event.stopPropagation();" title="Open media in new tab" style="font-size: 0.85rem; color: var(--primary); text-decoration: none; padding: 2px 5px; border-radius: 4px; background: rgba(59,130,246,0.1); flex-shrink: 0;">↗</a>
+                </div>
+            ` : '<span class="text-muted">-</span>';
+            const tdMedia = createCopyCell(mediaUrl, mediaHtml);
+            tr.appendChild(tdMedia);
+
+            // Board cell
+            const boardHtml = board ? `<span class="status-badge badge-pending" style="font-size: 0.72rem; word-break: break-word;">${escapeHtml(board)}</span>` : '<span class="text-muted">-</span>';
+            const tdBoard = createCopyCell(board, boardHtml);
+            tr.appendChild(tdBoard);
+
+            // Description cell
+            const descHtml = desc ? `<span style="font-size: 0.76rem; color: var(--text-muted); line-height: 1.35; max-width: 320px; display: block; word-break: break-word;">${escapeHtml(desc)}</span>` : '<span class="text-muted">-</span>';
+            const tdDesc = createCopyCell(desc, descHtml);
+            tr.appendChild(tdDesc);
+
+            // Publish Date cell
+            const dateHtml = pubDate ? `<span style="font-family: monospace; font-size: 0.74rem; color: var(--primary); white-space: nowrap;">${escapeHtml(pubDate)}</span>` : '<span class="text-muted">-</span>';
+            const tdDate = createCopyCell(pubDate, dateHtml);
+            tr.appendChild(tdDate);
+
+            // Article Link cell
+            const linkHtml = link ? `
+                <div class="d-flex align-center justify-between" style="gap: 4px;">
+                    <span style="font-size: 0.75rem; color: var(--primary); word-break: break-all;">${escapeHtml(link)}</span>
+                    <a href="${escapeHtml(link)}" target="_blank" onclick="event.stopPropagation();" title="Open destination URL in new tab" style="font-size: 0.85rem; color: var(--primary); text-decoration: none; padding: 2px 5px; border-radius: 4px; background: rgba(59,130,246,0.1); flex-shrink: 0;">↗</a>
+                </div>
+            ` : '<span class="text-muted">-</span>';
+            const tdLink = createCopyCell(link, linkHtml);
+            tr.appendChild(tdLink);
+
             tbody.appendChild(tr);
         });
+    }
+
+    function createCopyCell(copyText, innerHtml) {
+        const td = document.createElement('td');
+        td.style.cssText = 'cursor: pointer; padding: 10px 12px; vertical-align: top; transition: all 0.15s ease; position: relative;';
+        td.title = copyText ? '👆 Click to copy' : '';
+        td.innerHTML = innerHtml;
+
+        if (copyText) {
+            td.setAttribute('data-copy-val', copyText);
+            td.onmouseenter = function() {
+                if (!this.dataset.copied) {
+                    this.style.background = '#f1f5f9';
+                    this.style.boxShadow = 'inset 0 0 0 1px #cbd5e1';
+                }
+            };
+            td.onmouseleave = function() {
+                if (!this.dataset.copied) {
+                    this.style.background = '';
+                    this.style.boxShadow = '';
+                }
+            };
+            td.onclick = function() {
+                copyCell(this);
+            };
+        }
+        return td;
+    }
+
+    function copyCell(td) {
+        const text = td.getAttribute('data-copy-val');
+        if (!text) return;
+
+        copyToClipboard(text).then(() => {
+            td.dataset.copied = 'true';
+            td.style.background = '#dcfce7';
+            td.style.boxShadow = 'inset 0 0 0 1px #86efac';
+            
+            showToast('✓ Copied to clipboard!', 'success');
+            
+            setTimeout(() => {
+                delete td.dataset.copied;
+                td.style.background = '';
+                td.style.boxShadow = '';
+            }, 1200);
+        }).catch(() => {
+            showToast('Failed to copy to clipboard', 'error');
+        });
+    }
+
+    function copyToClipboard(text) {
+        if (!text) return Promise.reject(new Error('No text provided'));
+        if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text);
+        } else {
+            return new Promise((resolve, reject) => {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.top = '-9999px';
+                    ta.style.left = '-9999px';
+                    ta.setAttribute('readonly', '');
+                    document.body.appendChild(ta);
+                    ta.select();
+                    const success = document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    if (success) resolve();
+                    else reject(new Error('execCommand returned false'));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        }
     }
 
     function filterBatchPreview(query) {
@@ -1256,33 +1345,13 @@
         renderBatchPreviewTable(filtered);
     }
 
-    function copyCellText(text, btnEl) {
-        if (!text) return;
-        navigator.clipboard.writeText(text).then(() => {
-            if (btnEl) {
-                const orig = btnEl.textContent;
-                btnEl.textContent = '✓';
-                btnEl.style.background = '#dcfce7';
-                btnEl.style.color = '#16a34a';
-                setTimeout(() => {
-                    btnEl.textContent = orig;
-                    btnEl.style.background = '';
-                    btnEl.style.color = '';
-                }, 1200);
-            }
-            showToast('Copied to clipboard!', 'success');
-        }).catch(() => {
-            showToast('Failed to copy to clipboard', 'error');
-        });
-    }
-
     function copyEntireBatchCsv() {
         if (!currentBatchPreviewData || !currentBatchPreviewData.raw_csv) {
             showToast('No CSV data available to copy', 'error');
             return;
         }
 
-        navigator.clipboard.writeText(currentBatchPreviewData.raw_csv).then(() => {
+        copyToClipboard(currentBatchPreviewData.raw_csv).then(() => {
             const btn = document.getElementById('btn-copy-entire-csv');
             if (btn) {
                 const orig = btn.textContent;
