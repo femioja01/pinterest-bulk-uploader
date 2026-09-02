@@ -125,19 +125,7 @@ def upload_csv_to_pinterest(csv_path: Path, account_name: str, proxy_url: str | 
                 is_mobile=False,
                 has_touch=False,
                 locale="en-US",
-                timezone_id="America/New_York",
                 user_agent=REALISTIC_USER_AGENT,
-                extra_http_headers={
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-                    "Sec-Ch-Ua-Mobile": "?0",
-                    "Sec-Ch-Ua-Platform": '"macOS"',
-                    "Sec-Fetch-Dest": "document",
-                    "Sec-Fetch-Mode": "navigate",
-                    "Sec-Fetch-Site": "same-origin",
-                    "Sec-Fetch-User": "?1",
-                    "Upgrade-Insecure-Requests": "1",
-                },
             )
 
             # Inject stealth script to mask automation
@@ -168,7 +156,14 @@ def upload_csv_to_pinterest(csv_path: Path, account_name: str, proxy_url: str | 
                 pass
 
             # Wait for file inputs to be attached to the DOM
-            page.wait_for_selector('input[type="file"]', state="attached", timeout=30000)
+            try:
+                page.wait_for_selector('input[type="file"]', state="attached", timeout=30000)
+            except Exception as wait_err:
+                logger.error(f"Timeout waiting for file input on {page.url} (title: '{page.title()}'): {wait_err}")
+                page.screenshot(path=str(dirs["failed"] / f"{csv_path.stem}_file_input_timeout.png"))
+                context.close()
+                browser.close()
+                return False, f"Timeout waiting for Pinterest upload form: {wait_err}"
 
             # Locate the file input that accepts CSV files
             input_element = page.locator('input[type="file"][accept*=".csv"]').first
