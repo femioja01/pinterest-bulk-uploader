@@ -47,20 +47,30 @@ async def formatter_page(request: Request):
 
 
 @router.post("/api/formatter/inspect", response_class=JSONResponse)
-async def inspect_csv_endpoint(file: UploadFile = File(...)):
-    """Inspect master CSV for required columns and detected weeks."""
+async def inspect_csv_endpoint(
+    file: UploadFile | None = File(None),
+    raw_text: str | None = Form(None),
+):
+    """Inspect master CSV or pasted text for required columns and detected weeks."""
     try:
-        content = await file.read()
+        if file and file.filename:
+            content = await file.read()
+        elif raw_text and raw_text.strip():
+            content = raw_text.strip()
+        else:
+            return JSONResponse({"error": "No CSV file uploaded or pasted data provided"}, status_code=400)
+
         info = inspect_master_csv(content)
         return info
     except Exception as e:
         logger.error(f"Error inspecting CSV: {e}")
-        return JSONResponse({"error": f"Failed to read CSV: {str(e)}"}, status_code=400)
+        return JSONResponse({"error": f"Failed to inspect data: {str(e)}"}, status_code=400)
 
 
 @router.post("/api/formatter/convert")
 async def convert_csv_endpoint(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    raw_text: str | None = Form(None),
     target_template: str = Form("pinterest"),
     start_week: str = Form(""),
     end_week: str = Form(""),
@@ -71,9 +81,16 @@ async def convert_csv_endpoint(
     publish_daily_start: str = Form("08:00"),
     publish_daily_end: str = Form("22:00"),
 ):
-    """Format master CSV into Official Pinterest or Publer Bulk CSV format and return as download."""
+    """Format master CSV or pasted text into Official Pinterest or Publer Bulk CSV format and return as download."""
     try:
-        content = await file.read()
+        if file and file.filename:
+            content = await file.read()
+            orig_name = file.filename or "master_pins.csv"
+        elif raw_text and raw_text.strip():
+            content = raw_text.strip()
+            orig_name = "pasted_pins.csv"
+        else:
+            return JSONResponse({"error": "No CSV file uploaded or pasted data provided"}, status_code=400)
 
         s_week = int(start_week) if start_week.strip().isdigit() else None
         e_week = int(end_week) if end_week.strip().isdigit() else None
@@ -98,7 +115,6 @@ async def convert_csv_endpoint(
         out_df.to_csv(output, index=False)
         csv_bytes = output.getvalue().encode("utf-8-sig")
 
-        orig_name = file.filename or "master_pins.csv"
         clean_base = orig_name.rsplit(".", 1)[0]
         if spec_weeks:
             week_tag = f"_Weeks_{'_'.join(map(str, spec_weeks))}"
@@ -129,7 +145,8 @@ async def convert_csv_endpoint(
 
 @router.post("/api/formatter/convert-and-queue", response_class=JSONResponse)
 async def convert_and_queue_endpoint(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    raw_text: str | None = Form(None),
     account_id: int = Form(...),
     batch_size: int = Form(50),
     start_week: str = Form(""),
@@ -141,7 +158,7 @@ async def convert_and_queue_endpoint(
     publish_daily_start: str = Form("08:00"),
     publish_daily_end: str = Form("22:00"),
 ):
-    """Format master CSV and immediately split & queue for an account."""
+    """Format master CSV or pasted text and immediately split & queue for an account."""
     factory = get_session_factory()
     with factory() as session:
         account = session.query(Account).filter(Account.id == account_id).first()
@@ -150,7 +167,14 @@ async def convert_and_queue_endpoint(
         account_name = account.name
 
     try:
-        content = await file.read()
+        if file and file.filename:
+            content = await file.read()
+            orig_filename = file.filename
+        elif raw_text and raw_text.strip():
+            content = raw_text.strip()
+            orig_filename = "pasted_pins.csv"
+        else:
+            return JSONResponse({"error": "No CSV file uploaded or pasted data provided"}, status_code=400)
 
         s_week = int(start_week) if start_week.strip().isdigit() else None
         e_week = int(end_week) if end_week.strip().isdigit() else None
@@ -172,7 +196,7 @@ async def convert_and_queue_endpoint(
 
         dirs = ensure_account_dirs(account_name)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        orig_clean = (file.filename or "master").rsplit(".", 1)[0]
+        orig_clean = (orig_filename or "master").rsplit(".", 1)[0]
         formatted_master_filename = f"master_{timestamp}_{orig_clean}_Official.csv"
         master_path = dirs["pins"] / formatted_master_filename
 
@@ -218,7 +242,7 @@ async def convert_and_queue_endpoint(
                 batch = Batch(
                     account_id=account.id,
                     filename=bf.name,
-                    original_filename=file.filename,
+                    original_filename=orig_filename,
                     pin_count=max(0, pin_count),
                     status=BatchStatus.PENDING,
                     scheduled_upload_at=batch_upload_at,
@@ -229,7 +253,7 @@ async def convert_and_queue_endpoint(
             log = ActivityLog(
                 account_id=account.id,
                 event_type="formatted_queue",
-                message=f"Formatted & queued {file.filename}{sched_info} -> {len(batch_files)} batches ({len(out_df)} pins)",
+                message=f"Formatted & queued {orig_filename}{sched_info} -> {len(batch_files)} batches ({len(out_df)} pins)",
             )
             session.add(log)
             session.commit()

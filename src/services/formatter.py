@@ -85,12 +85,210 @@ def find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
     return None
 
 
-def inspect_master_csv(file_bytes_or_path: bytes | Path | str) -> dict:
-    """Inspects a Master CSV and extracts column mapping, detected weeks, and row counts."""
-    if isinstance(file_bytes_or_path, bytes):
-        df = pd.read_csv(io.BytesIO(file_bytes_or_path), encoding="utf-8-sig", encoding_errors="replace")
+def clean_url(val: str) -> str:
+    """Extracts a clean URL from text, stripping markdown link syntax [text](url)."""
+    if not val or pd.isna(val):
+        return ""
+    val = str(val).strip()
+    m = re.search(r"\((https?://[^\s\)]+)\)", val)
+    if m:
+        return m.group(1)
+    m2 = re.search(r"\[(https?://[^\]]+)\]", val)
+    if m2:
+        return m2.group(1)
+    m3 = re.search(r"https?://\S+", val)
+    if m3:
+        return m3.group(0).rstrip(")]\"'")
+    return val
+
+
+def is_image_url(s: str) -> bool:
+    """Checks if a string represents an image or media link."""
+    s = s.strip().lower()
+    return bool(re.search(r"(ibb\.co|imgur|cloudinary|\.(jpg|jpeg|png|webp|gif|avif))", s))
+
+
+def parse_pasted_data(text: str) -> pd.DataFrame:
+    """Intelligently parses pasted data (TSV, Markdown table, CSV, or vertical line streams) into a DataFrame."""
+    text = text.strip()
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if not lines:
+        raise ValueError("Pasted text is empty")
+
+    first_few = lines[:5]
+
+    # 1. Tab separated (TSV copied from Google Sheets / Excel)
+    if any("\t" in l for l in first_few):
+        try:
+            df = pd.read_csv(io.StringIO(text), sep="\t", encoding_errors="replace")
+            if len(df.columns) >= 2 and len(df) > 0:
+                for col in df.columns:
+                    if any(term in col.lower() for term in ["link", "url"]):
+                        df[col] = df[col].apply(clean_url)
+                return df
+        except Exception:
+            pass
+
+    # 2. Markdown table (| col1 | col2 |)
+    if any(l.startswith("|") and l.endswith("|") for l in first_few):
+        tbl_lines = [l for l in lines if l.startswith("|") and not re.match(r"^\|(\s*:?-+:?\s*\|)+$", l)]
+        if len(tbl_lines) >= 2:
+            rows = []
+            for line in tbl_lines:
+                cells = [c.strip() for c in line.split("|")[1:-1]]
+                rows.append(cells)
+            if rows:
+                df = pd.DataFrame(rows[1:], columns=rows[0])
+                for col in df.columns:
+                    if any(term in col.lower() for term in ["link", "url"]):
+                        df[col] = df[col].apply(clean_url)
+                return df
+
+    # 3. Standard CSV with commas
+    if any("," in l for l in first_few):
+        try:
+            df = pd.read_csv(io.StringIO(text), encoding_errors="replace")
+            if len(df.columns) >= 2 and len(df) > 0:
+                for col in df.columns:
+                    if any(term in col.lower() for term in ["link", "url"]):
+                        df[col] = df[col].apply(clean_url)
+                return df
+        except Exception:
+            pass
+
+    # 4. Vertical stream (ChatGPT / notion / web copy-paste where each cell is on a line)
+    known_headers = [
+        "main_keyword", "search_volume", "additional_keywords", "related_interests",
+        "summary", "board", "blogpost_title", "blogpost_url", "keyword", "pin_title",
+        "pin_description", "image_prompt_index", "image_prompt_text", "week",
+        "article link", "media link", "title", "description", "link", "media url",
+        "pinterest board", "thumbnail", "publish date", "keywords"
+    ]
+
+    header_count = 0
+    for l in lines:
+        if l.lower() in known_headers:
+            header_count += 1
+        else:
+            break
+
+    if header_count >= 3:
+        headers = lines[:header_count]
+        data = lines[header_count:]
     else:
-        df = pd.read_csv(file_bytes_or_path, encoding="utf-8-sig", encoding_errors="replace")
+        headers = []
+        data = lines
+
+    # Try to segment into records
+    img_indices = [i for i, l in enumerate(data) if is_image_url(l)]
+    records = []
+
+    if len(img_indices) >= 1:
+        distances = [img_indices[0] + 1] + [img_indices[i] - img_indices[i-1] for i in range(1, len(img_indices))]
+        if len(set(distances)) == 1:
+            step = distances[0]
+            for i in range(0, len(data), step):
+                chunk = data[i:i+step]
+                if chunk:
+                    records.append(chunk)
+        else:
+            start = 0
+            for img_idx in img_indices:
+                records.append(data[start:img_idx+1])
+                start = img_idx + 1
+
+    if not records:
+        chunk_len = len(headers) if headers else 15
+        for i in range(0, len(data), chunk_len):
+            chunk = data[i:i+chunk_len]
+            if chunk:
+                records.append(chunk)
+
+    # Build DataFrame from records
+    rows = []
+    for r in records:
+        row_dict = {}
+        if headers:
+            if len(r) == len(headers):
+                for h, val in zip(headers, r):
+                    row_dict[h] = val
+            elif len(r) == len(headers) - 1:
+                # One header omitted in data (e.g. empty 'summary')
+                if "summary" in [h.lower() for h in headers]:
+                    sum_idx = [h.lower() for h in headers].index("summary")
+                    for i in range(sum_idx):
+                        row_dict[headers[i]] = r[i]
+                    row_dict[headers[sum_idx]] = ""
+                    for i in range(sum_idx + 1, len(headers)):
+                        row_dict[headers[i]] = r[i - 1]
+                else:
+                    for i, val in enumerate(r):
+                        row_dict[headers[i]] = val
+            else:
+                for i, val in enumerate(r):
+                    col_name = headers[i] if i < len(headers) else f"Column_{i+1}"
+                    row_dict[col_name] = val
+        else:
+            if len(r) == 15 and is_image_url(r[-1]):
+                default_cols = [
+                    "main_keyword", "search_volume", "additional_keywords", "related_interests",
+                    "board", "blogpost_title", "blogpost_url", "keyword", "pin_title",
+                    "pin_description", "image_prompt_index", "image_prompt_text", "week",
+                    "Article link", "Media Link"
+                ]
+                for h, val in zip(default_cols, r):
+                    row_dict[h] = val
+            elif len(r) == 16:
+                default_cols = [
+                    "main_keyword", "search_volume", "additional_keywords", "related_interests",
+                    "summary", "board", "blogpost_title", "blogpost_url", "keyword", "pin_title",
+                    "pin_description", "image_prompt_index", "image_prompt_text", "week",
+                    "Article link", "Media Link"
+                ]
+                for h, val in zip(default_cols, r):
+                    row_dict[h] = val
+            elif len(r) == 8:
+                for h, val in zip(PINTEREST_COLUMNS, r):
+                    row_dict[h] = val
+            else:
+                for i, val in enumerate(r):
+                    row_dict[f"Column_{i+1}"] = val
+        rows.append(row_dict)
+
+    df = pd.DataFrame(rows)
+
+    # Clean URL columns
+    for col in df.columns:
+        if any(term in str(col).lower() for term in ["link", "url"]):
+            df[col] = df[col].apply(clean_url)
+
+    return df
+
+
+def load_as_dataframe(input_data: bytes | Path | str | pd.DataFrame) -> pd.DataFrame:
+    """Helper to load any input type (bytes, path, raw text, DataFrame) into a DataFrame."""
+    if isinstance(input_data, pd.DataFrame):
+        return input_data.copy()
+    if isinstance(input_data, bytes):
+        return pd.read_csv(io.BytesIO(input_data), encoding="utf-8-sig", encoding_errors="replace")
+    if isinstance(input_data, Path):
+        return pd.read_csv(input_data, encoding="utf-8-sig", encoding_errors="replace")
+    if isinstance(input_data, str):
+        if "\n" in input_data or "\r" in input_data or len(input_data) > 255:
+            return parse_pasted_data(input_data)
+        try:
+            p = Path(input_data)
+            if p.exists() and p.is_file():
+                return pd.read_csv(p, encoding="utf-8-sig", encoding_errors="replace")
+        except (OSError, ValueError):
+            pass
+        return parse_pasted_data(input_data)
+    raise ValueError(f"Unsupported data input type: {type(input_data)}")
+
+
+def inspect_master_csv(file_bytes_or_path: bytes | Path | str | pd.DataFrame) -> dict:
+    """Inspects a Master CSV and extracts column mapping, detected weeks, and row counts."""
+    df = load_as_dataframe(file_bytes_or_path)
 
     total_raw_rows = len(df)
     columns = [str(c).strip() for c in df.columns]
@@ -214,7 +412,7 @@ def generate_pin_publish_dates(
 
 
 def format_master_csv(
-    file_bytes_or_path: bytes | Path | str,
+    file_bytes_or_path: bytes | Path | str | pd.DataFrame,
     target_template: str = "pinterest",
     start_week: int | None = None,
     end_week: int | None = None,
@@ -226,10 +424,7 @@ def format_master_csv(
     publish_daily_end: str = "22:00",
 ) -> tuple[pd.DataFrame, dict]:
     """Formats a Master CSV into Pinterest Official or Publer Bulk Upload format."""
-    if isinstance(file_bytes_or_path, bytes):
-        df = pd.read_csv(io.BytesIO(file_bytes_or_path), encoding="utf-8-sig", encoding_errors="replace")
-    else:
-        df = pd.read_csv(file_bytes_or_path, encoding="utf-8-sig", encoding_errors="replace")
+    df = load_as_dataframe(file_bytes_or_path)
 
     total_raw_rows = len(df)
 

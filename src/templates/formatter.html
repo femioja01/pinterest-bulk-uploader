@@ -15,24 +15,61 @@
     
     <!-- LEFT PANEL: FILE UPLOAD & CONTROLS -->
     <div class="card" style="border: 1px solid var(--border-color); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-        <div class="card-header" style="padding: 16px 20px; background: #f8fafc; border-bottom: 1px solid var(--border-color);">
+        <div class="card-header d-flex justify-between align-center" style="padding: 14px 20px; background: #f8fafc; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; gap: 8px;">
             <h3 style="margin: 0; font-size: 1.05rem; color: var(--text-dark); display: flex; align-items: center; gap: 8px;">
                 📁 Master CSV Source
             </h3>
+            <div style="display: flex; gap: 4px; background: #e2e8f0; padding: 3px; border-radius: 8px;">
+                <button type="button" id="tab-btn-file" class="btn btn-sm" onclick="switchSourceTab('file')" style="font-size: 0.78rem; padding: 4px 10px; border-radius: 6px; background: #ffffff; color: var(--text-dark); font-weight: 600; border: none; box-shadow: 0 1px 2px rgba(0,0,0,0.06); cursor: pointer;">
+                    📁 Upload File
+                </button>
+                <button type="button" id="tab-btn-paste" class="btn btn-sm" onclick="switchSourceTab('paste')" style="font-size: 0.78rem; padding: 4px 10px; border-radius: 6px; background: transparent; color: var(--text-muted); font-weight: 500; border: none; cursor: pointer;">
+                    📋 Paste Data
+                </button>
+            </div>
         </div>
         <div class="card-body" style="padding: 20px;">
             <form id="formatter-form" onsubmit="event.preventDefault();">
                 
-                <!-- Dropzone Area -->
-                <div class="drop-zone" id="master-dropzone" style="border: 2px dashed #cbd5e1; border-radius: 10px; padding: 26px 16px; text-align: center; background: #f8fafc; cursor: pointer; transition: all 0.2s ease;">
-                    <div style="font-size: 2.2rem; margin-bottom: 8px;">📊</div>
-                    <strong style="font-size: 0.95rem; color: var(--text-dark); display: block;" id="dropzone-label">
-                        Drag & Drop Master CSV or Click to Browse
-                    </strong>
-                    <span class="text-muted" style="font-size: 0.78rem; display: block; margin-top: 4px;" id="dropzone-filename">
-                        Supports master keywords, fall pins, multi-week files (.csv)
-                    </span>
-                    <input type="file" id="master-file-input" accept=".csv" style="display: none;" onchange="handleFileSelected(this.files[0])">
+                <!-- SOURCE MODE 1: Dropzone File Area -->
+                <div id="source-file-container">
+                    <div class="drop-zone" id="master-dropzone" style="border: 2px dashed #cbd5e1; border-radius: 10px; padding: 26px 16px; text-align: center; background: #f8fafc; cursor: pointer; transition: all 0.2s ease;">
+                        <div style="font-size: 2.2rem; margin-bottom: 8px;">📊</div>
+                        <strong style="font-size: 0.95rem; color: var(--text-dark); display: block;" id="dropzone-label">
+                            Drag & Drop Master CSV or Click to Browse
+                        </strong>
+                        <span class="text-muted" style="font-size: 0.78rem; display: block; margin-top: 4px;" id="dropzone-filename">
+                            Supports master keywords, fall pins, multi-week files (.csv)
+                        </span>
+                        <input type="file" id="master-file-input" accept=".csv" style="display: none;" onchange="handleFileSelected(this.files[0])">
+                    </div>
+                </div>
+
+                <!-- SOURCE MODE 2: Paste Data Area -->
+                <div id="source-paste-container" style="display: none;">
+                    <div class="d-flex justify-between align-center" style="margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+                        <label for="paste-input-area" style="font-size: 0.82rem; font-weight: 600; color: var(--text-dark); margin: 0;">
+                            📋 Paste Spreadsheet / Vertical Data:
+                        </label>
+                        <div class="d-flex gap-1">
+                            <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 3px 8px;" onclick="pasteFromClipboard()">
+                                📋 Paste Clipboard
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 3px 8px;" onclick="loadSamplePaste()">
+                                ✨ Load Sample
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 3px 8px;" onclick="clearPaste()">
+                                🗑️ Clear
+                            </button>
+                        </div>
+                    </div>
+                    <textarea id="paste-input-area" class="form-input" rows="8" placeholder="Paste your pins here...&#10;Supports:&#10;• Vertical column lists (from ChatGPT, Notion, Perplexity)&#10;• Google Sheets / Excel copy-paste (TSV)&#10;• Markdown tables (| col |)&#10;• Standard CSV text" style="width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.78rem; line-height: 1.45; padding: 10px; border: 2px solid #cbd5e1; border-radius: 8px; resize: vertical; box-sizing: border-box; background: #ffffff;" oninput="onPasteInputChanged()"></textarea>
+                    <div class="d-flex justify-between align-center" style="margin-top: 8px;">
+                        <span class="text-muted" style="font-size: 0.72rem;" id="paste-stats-text">0 lines pasted</span>
+                        <button type="button" class="btn btn-primary btn-sm" id="btn-parse-paste" style="font-size: 0.78rem; padding: 4px 12px; font-weight: 600;" onclick="handlePasteInspect()">
+                            🔍 Parse & Inspect Data
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Inspection Loading / Status -->
@@ -281,12 +318,90 @@
 
 {% endblock %}
 
-{% block scripts %}
 <script>
     let selectedMasterFile = null;
+    let pastedRawText = '';
+    let activeSourceMode = 'file'; // 'file' or 'paste'
     let masterInspectionData = null;
     let selectedSpecificWeeks = new Set();
     let currentTemplate = 'pinterest';
+
+    const SAMPLE_PASTE_DATA = `main_keyword
+search_volume
+additional_keywords
+related_interests
+summary
+board
+blogpost_title
+blogpost_url
+keyword
+pin_title
+pin_description
+image_prompt_index
+image_prompt_text
+week
+Article link
+Media Link
+bottle crafts
+226,299
+diy bottle crafts, bottle craft ideas, diy bottle crafts ideas, bottle diy crafts, crafts with bottles, craft bottle ideas, bottle art and craft, art on bottles craft ideas, bottle craft diy, craft on bottle
+jar crafts,jar art,waste material craft ideas,plastic bottle art,mini bottle painting,crafts with glass bottles,glass bottles art,recycling ideas,plastic bottles crafts,bottle art ideas,plastic bottle crafts,glass bottle crafts,diy bottle crafts,water bottle crafts,bottle craft ideas,medicine bottle crafts,mini glass bottle crafts,small glass bottle crafts,coke bottle crafts,patron bottle crafts
+quick crafts
+29 Bottle Crafts That Will Blow Your Mind (Easy DIY Projects)
+/bottle-crafts
+diy bottle crafts
+29 Bottle Crafts: DIY Bottle Crafts for Home Decor & Gifts
+Unleash your creativity with 29 bottle crafts featuring simple diy bottle crafts. From bottle art ideas to recycling ideas, these projects include plastic bottles crafts and glass bottle crafts. Incorporate jar art and mini glass bottle crafts for unique decor. Perfect for diy bottle crafts enthusiasts looking for waste material craft ideas. Turn ordinary bottles into personalized gifts with these bottle craft ideas!
+2
+2 - Create a viral Pinterest pin that is a 2 to 6 collage of photos. The central focus must be groovy, retro, bold text that says "29 Bottle Crafts: DIY Bottle Crafts for Home Decor & Gifts". This text must be capitalized, colored white, and have a distinct pink outline.
+Week 2
+[https://postagemaster.com/bottle-crafts](https://postagemaster.com/bottle-crafts)
+[https://i.ibb.co/JWy0HC7M/20260902-2-Create-a-viral-Pinterest-pin-that-is.jpg](https://i.ibb.co/JWy0HC7M/20260902-2-Create-a-viral-Pinterest-pin-that-is.jpg)
+art and craft
+163,450
+craft ideas, diy and crafts, diy arts and crafts, art and craft ideas, crafts ideas, the craft, diy crafts to do, crafts to do, arts and crafts ideas, diy crafts ideas
+easy paper crafts diy,painting ideas,quick crafts,cute craft ideas,creative arts and crafts,arts and crafts projects,arts and crafts easy,diy arts and crafts,craft ideas for kids,crafts for adults,arts and crafts for kids,art and craft ideas,summer arts and crafts,arts and crafts aesthetic,arts and crafts movement,spring arts and crafts,arts and crafts for preschoolers,halloween arts and crafts,easy arts and crafts,art and craft ideas creativity
+quick crafts
+29 Creative Art and Craft Ideas to Inspire Your Next Project
+/art-and-craft-ideas
+craft ideas
+29 Craft Ideas to Spark Your Imagination ✨
+Discover 29 craft ideas that spark joy and creativity. From easy paper creations to diy arts and crafts, these projects suit all ages. Use simple supplies to make beautiful gifts and decor. Try painting, sewing, or quick projects for instant fun. Elevate your art and craft skills with these cute ideas. Perfect for weekends or group activities. 🎨✨
+13
+13 - Create a viral Pinterest pin that is a 2 to 6 collage of photos. The central focus must be groovy, retro, bold text that says "29 Craft Ideas to Spark Your Imagination ✨". This text must be capitalized, colored white, and have a distinct pink outline.
+Week 2
+[https://postagemaster.com/art-and-craft-ideas](https://postagemaster.com/art-and-craft-ideas)
+[https://i.ibb.co/shYsmbf/20260902-13-Create-a-viral-Pinterest-pin-that-i.jpg](https://i.ibb.co/shYsmbf/20260902-13-Create-a-viral-Pinterest-pin-that-i.jpg)
+wood crafts
+148,638
+wood craft, wood crafts diy, wood craft ideas, wood crafts ideas, wood craft projects, handmade wood crafts, craft wood, crafts with wood, diy wood craft ideas, diy crafts wood
+small wooden projects,easy wood crafts,scrap wood projects to sell,woodworking projects diy,cute wood projects,wooden diy crafts,scrap wood art,wooden crafts ideas,little wood projects,wood christmas crafts,christmas wood crafts,scrap wood crafts,wood craft patterns,wood crafts diy,4th of july wood crafts,halloween wood crafts,laser cut wood crafts,barn wood crafts,4x4 wood crafts,snowman wood crafts
+quick crafts
+29 Brilliant Wood Crafts That Will Transform Your Home Decor
+/wood-crafts
+wood craft
+29 Wood Craft Projects: Must-Try Wood Crafts for DIY Lovers 🪚
+Find 29 stunning wood craft projects featuring easy wood crafts and cute wood projects. These small wooden DIYs include scrap wood ideas perfect for selling. Start with woodworking projects today! 🛠️
+24
+24 - Create a viral Pinterest pin that is a 2 to 6 collage of photos. The central focus must be groovy, retro, bold text that says "29 Wood Craft Projects: Must-Try Wood Crafts for DIY Lovers 🪚". This text must be capitalized, colored white, and have a distinct pink outline.
+Week 2
+[https://postagemaster.com/wood-crafts](https://postagemaster.com/wood-crafts)
+[https://i.ibb.co/DDQp9MWm/20260902-24-Create-a-viral-Pinterest-pin-that-i.jpg](https://i.ibb.co/DDQp9MWm/20260902-24-Create-a-viral-Pinterest-pin-that-i.jpg)
+ice cream stick craft
+145,665
+craft with ice cream sticks, ice cream sticks craft ideas art, diy ice cream stick craft ideas, stick ice cream craft, crafts with ice cream sticks, ice cream stick craft ideas, ice cream stick crafts, craft ideas with ice cream sticks, craft with ice cream sticks ideas, craft ice cream sticks
+paper crafts,ice cream sticks craft ideas wall hangings,pop stick craft,popstick craft diy,popsicle stick crafts for kids,icecreamsticks crafts,ice sticks craft ideas,ice cream stick pen holder,lolly stick craft,ice cream stick bookmark,ice cream stick craft decoration,ice cream sticks craft ideas art,ice cream stick crafts for kids,ice cream sticks craft ideas for kids,ice cream stick craft easy,ice cream stick craft aesthetic,simple ice cream stick craft,ice cream stick craft christmas,craft with ice cream sticks ideas,art and craft with ice cream sticks
+quick crafts
+29 Creative Ice Cream Stick Craft Ideas for Endless DIY Fun
+/ice-cream-stick-craft
+craft with ice cream sticks
+29 Ice Cream Stick Craft: Easy Crafts with Ice Cream Sticks
+Explore 29 fun ways to craft with ice cream sticks, from simple bookmarks to intricate wall art. 🌟 This roundup includes ice cream stick craft ideas for kids and adults alike. Try popsicle stick crafts for kids or create a beautiful ice cream stick craft decoration. We love using lolly stick craft techniques and ice cream stick bookmark designs. Grab your supplies and dive into these craft with ice cream sticks ideas!
+35
+35 - Create a viral Pinterest pin that is a 2 to 6 collage of photos. The central focus must be groovy, retro, bold text that says "29 Ice Cream Stick Craft: Easy Crafts with Ice Cream Sticks". This text must be capitalized, colored white, and have a distinct pink outline.
+Week 2
+[https://postagemaster.com/ice-cream-stick-craft](https://postagemaster.com/ice-cream-stick-craft)
+[https://i.ibb.co/1fV8NnMH/20260902-35-Create-a-viral-Pinterest-pin-that-i.jpg](https://i.ibb.co/1fV8NnMH/20260902-35-Create-a-viral-Pinterest-pin-that-i.jpg)`;
 
     window.addEventListener('DOMContentLoaded', () => {
         const dropzone = document.getElementById('master-dropzone');
@@ -311,6 +426,219 @@
             }
         });
     });
+
+    function switchSourceTab(mode) {
+        activeSourceMode = mode;
+        const btnFile = document.getElementById('tab-btn-file');
+        const btnPaste = document.getElementById('tab-btn-paste');
+        const fileContainer = document.getElementById('source-file-container');
+        const pasteContainer = document.getElementById('source-paste-container');
+
+        if (mode === 'file') {
+            btnFile.style.background = '#ffffff';
+            btnFile.style.color = 'var(--text-dark)';
+            btnFile.style.fontWeight = '600';
+            btnFile.style.boxShadow = '0 1px 2px rgba(0,0,0,0.06)';
+
+            btnPaste.style.background = 'transparent';
+            btnPaste.style.color = 'var(--text-muted)';
+            btnPaste.style.fontWeight = '500';
+            btnPaste.style.boxShadow = 'none';
+
+            fileContainer.style.display = 'block';
+            pasteContainer.style.display = 'none';
+        } else {
+            btnPaste.style.background = '#ffffff';
+            btnPaste.style.color = 'var(--text-dark)';
+            btnPaste.style.fontWeight = '600';
+            btnPaste.style.boxShadow = '0 1px 2px rgba(0,0,0,0.06)';
+
+            btnFile.style.background = 'transparent';
+            btnFile.style.color = 'var(--text-muted)';
+            btnFile.style.fontWeight = '500';
+            btnFile.style.boxShadow = 'none';
+
+            fileContainer.style.display = 'none';
+            pasteContainer.style.display = 'block';
+        }
+    }
+
+    function onPasteInputChanged() {
+        const text = document.getElementById('paste-input-area').value;
+        pastedRawText = text;
+        const lines = text.split('\n').filter(l => l.trim().length > 0);
+        document.getElementById('paste-stats-text').textContent = `${lines.length} lines (${text.length} chars)`;
+    }
+
+    function loadSamplePaste() {
+        const area = document.getElementById('paste-input-area');
+        area.value = SAMPLE_PASTE_DATA;
+        onPasteInputChanged();
+        handlePasteInspect();
+    }
+
+    async function pasteFromClipboard() {
+        try {
+            if (!navigator.clipboard || !navigator.clipboard.readText) {
+                showToast('Clipboard access not supported or allowed by browser. Please paste manually (Ctrl+V / Cmd+V).', 'warning');
+                return;
+            }
+            const text = await navigator.clipboard.readText();
+            if (!text || !text.trim()) {
+                showToast('Clipboard is empty', 'warning');
+                return;
+            }
+            const area = document.getElementById('paste-input-area');
+            area.value = text;
+            onPasteInputChanged();
+            handlePasteInspect();
+        } catch (err) {
+            showToast('Could not read clipboard: ' + (err.message || err), 'error');
+        }
+    }
+
+    function clearPaste() {
+        const area = document.getElementById('paste-input-area');
+        area.value = '';
+        pastedRawText = '';
+        onPasteInputChanged();
+        masterInspectionData = null;
+        document.getElementById('inspect-status').style.display = 'none';
+        document.getElementById('mapping-card').style.display = 'none';
+        document.getElementById('week-filter-section').style.display = 'none';
+        document.getElementById('schedule-dates-section').style.display = 'none';
+        document.getElementById('queue-destination-section').style.display = 'none';
+        document.getElementById('btn-process').disabled = true;
+        document.getElementById('preview-placeholder').style.display = 'block';
+        document.getElementById('preview-container').style.display = 'none';
+    }
+
+    function handlePasteInspect() {
+        const text = document.getElementById('paste-input-area').value.trim();
+        if (!text) {
+            showToast('Please paste data into the box first', 'warning');
+            return;
+        }
+        pastedRawText = text;
+
+        const statusEl = document.getElementById('inspect-status');
+        statusEl.style.display = 'block';
+        statusEl.style.background = '#eff6ff';
+        statusEl.style.color = 'var(--primary)';
+        statusEl.textContent = '⏳ Parsing and inspecting pasted data...';
+
+        const formData = new FormData();
+        formData.append('raw_text', text);
+
+        fetch('/api/formatter/inspect', {
+            method: 'POST',
+            body: formData
+        })
+        .then(async res => {
+            const data = await res.json().catch(() => ({ error: 'Server returned an invalid response' }));
+            if (!res.ok || data.error) {
+                statusEl.style.background = '#fef2f2';
+                statusEl.style.color = 'var(--danger)';
+                statusEl.textContent = `❌ ${data.error || 'Failed to inspect pasted data'}`;
+                document.getElementById('btn-process').disabled = true;
+                return;
+            }
+            applyInspectionData(data);
+        })
+        .catch(err => {
+            statusEl.style.background = '#fef2f2';
+            statusEl.style.color = 'var(--danger)';
+            statusEl.textContent = `❌ Network error inspecting pasted data: ${err.message || err}`;
+        });
+    }
+
+    function handleFileSelected(file) {
+        if (!file || !file.name.endsWith('.csv')) {
+            showToast('Please select a valid .csv file', 'error');
+            return;
+        }
+
+        selectedMasterFile = file;
+        document.getElementById('dropzone-label').textContent = file.name;
+        document.getElementById('dropzone-filename').textContent = `${(file.size / 1024).toFixed(1)} KB`;
+
+        const statusEl = document.getElementById('inspect-status');
+        statusEl.style.display = 'block';
+        statusEl.style.background = '#eff6ff';
+        statusEl.style.color = 'var(--primary)';
+        statusEl.textContent = '⏳ Inspecting CSV structure and detected weeks...';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch('/api/formatter/inspect', {
+            method: 'POST',
+            body: formData
+        })
+        .then(async res => {
+            const data = await res.json().catch(() => ({ error: 'Server returned an invalid response' }));
+            if (!res.ok || data.error) {
+                statusEl.style.background = '#fef2f2';
+                statusEl.style.color = 'var(--danger)';
+                statusEl.textContent = `❌ ${data.error || 'Failed to inspect CSV'}`;
+                document.getElementById('btn-process').disabled = true;
+                return;
+            }
+            applyInspectionData(data);
+        })
+        .catch(err => {
+            statusEl.style.background = '#fef2f2';
+            statusEl.style.color = 'var(--danger)';
+            statusEl.textContent = `❌ Network error inspecting CSV: ${err.message || err}`;
+        });
+    }
+
+    function applyInspectionData(data) {
+        masterInspectionData = data;
+        const statusEl = document.getElementById('inspect-status');
+        statusEl.style.display = 'block';
+        statusEl.style.background = '#f0fdf4';
+        statusEl.style.color = '#16a34a';
+        statusEl.textContent = `✅ Successfully mapped columns (${data.total_rows} rows found)`;
+
+        // Populate mapping box
+        document.getElementById('mapping-card').style.display = 'block';
+        document.getElementById('map-title').textContent = data.mapped_columns.title || 'Not found';
+        document.getElementById('map-media').textContent = data.mapped_columns.media_url || 'Not found';
+        document.getElementById('map-board').textContent = data.mapped_columns.board || 'Not found';
+        document.getElementById('map-desc').textContent = data.mapped_columns.description || 'Not found';
+        document.getElementById('map-link').textContent = data.mapped_columns.link || 'Not found';
+        document.getElementById('map-total-rows').textContent = data.total_rows;
+
+        // Handle Detected Weeks
+        if (data.has_weeks && data.detected_weeks.length > 0) {
+            document.getElementById('week-filter-section').style.display = 'block';
+            const pillsContainer = document.getElementById('specific-weeks-pills');
+            pillsContainer.innerHTML = '';
+            selectedSpecificWeeks.clear();
+
+            data.detected_weeks.forEach(w => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-secondary btn-sm';
+                btn.style.fontSize = '0.75rem';
+                btn.style.padding = '3px 8px';
+                btn.textContent = `${w.label} (${w.count})`;
+                btn.onclick = () => toggleWeekPill(btn, w.week_num);
+                pillsContainer.appendChild(btn);
+            });
+        } else {
+            document.getElementById('week-filter-section').style.display = 'none';
+        }
+
+        document.getElementById('schedule-dates-section').style.display = 'block';
+        if (currentTemplate === 'pinterest') {
+            document.getElementById('queue-destination-section').style.display = 'block';
+        }
+        document.getElementById('btn-process').disabled = false;
+
+        updateActionPreview();
+    }
 
     function onTemplateChange(tmpl) {
         currentTemplate = tmpl;
@@ -368,89 +696,6 @@
         updateActionPreview();
     }
 
-    function handleFileSelected(file) {
-        if (!file || !file.name.endsWith('.csv')) {
-            showToast('Please select a valid .csv file', 'error');
-            return;
-        }
-
-        selectedMasterFile = file;
-        document.getElementById('dropzone-label').textContent = file.name;
-        document.getElementById('dropzone-filename').textContent = `${(file.size / 1024).toFixed(1)} KB`;
-
-        const statusEl = document.getElementById('inspect-status');
-        statusEl.style.display = 'block';
-        statusEl.style.background = '#eff6ff';
-        statusEl.style.color = 'var(--primary)';
-        statusEl.textContent = '⏳ Inspecting CSV structure and detected weeks...';
-
-        const formData = new FormData();
-        formData.append('file', file);
-
-        fetch('/api/formatter/inspect', {
-            method: 'POST',
-            body: formData
-        })
-        .then(async res => {
-            const data = await res.json().catch(() => ({ error: 'Server returned an invalid response' }));
-            if (!res.ok || data.error) {
-                statusEl.style.background = '#fef2f2';
-                statusEl.style.color = 'var(--danger)';
-                statusEl.textContent = `❌ ${data.error || 'Failed to inspect CSV'}`;
-                document.getElementById('btn-process').disabled = true;
-                return;
-            }
-
-            masterInspectionData = data;
-            statusEl.style.background = '#f0fdf4';
-            statusEl.style.color = '#16a34a';
-            statusEl.textContent = `✅ Successfully mapped columns (${data.total_rows} rows found)`;
-
-            // Populate mapping box
-            document.getElementById('mapping-card').style.display = 'block';
-            document.getElementById('map-title').textContent = data.mapped_columns.title || 'Not found';
-            document.getElementById('map-media').textContent = data.mapped_columns.media_url || 'Not found';
-            document.getElementById('map-board').textContent = data.mapped_columns.board || 'Not found';
-            document.getElementById('map-desc').textContent = data.mapped_columns.description || 'Not found';
-            document.getElementById('map-link').textContent = data.mapped_columns.link || 'Not found';
-            document.getElementById('map-total-rows').textContent = data.total_rows;
-
-            // Handle Detected Weeks
-            if (data.has_weeks && data.detected_weeks.length > 0) {
-                document.getElementById('week-filter-section').style.display = 'block';
-                const pillsContainer = document.getElementById('specific-weeks-pills');
-                pillsContainer.innerHTML = '';
-                selectedSpecificWeeks.clear();
-
-                data.detected_weeks.forEach(w => {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'btn btn-secondary btn-sm';
-                    btn.style.fontSize = '0.75rem';
-                    btn.style.padding = '3px 8px';
-                    btn.textContent = `${w.label} (${w.count})`;
-                    btn.onclick = () => toggleWeekPill(btn, w.week_num);
-                    pillsContainer.appendChild(btn);
-                });
-            } else {
-                document.getElementById('week-filter-section').style.display = 'none';
-            }
-
-            document.getElementById('schedule-dates-section').style.display = 'block';
-            if (currentTemplate === 'pinterest') {
-                document.getElementById('queue-destination-section').style.display = 'block';
-            }
-            document.getElementById('btn-process').disabled = false;
-
-            updateActionPreview();
-        })
-        .catch(err => {
-            statusEl.style.background = '#fef2f2';
-            statusEl.style.color = 'var(--danger)';
-            statusEl.textContent = `❌ Network error inspecting CSV: ${err.message || err}`;
-        });
-    }
-
     function onWeekModeChange(mode) {
         document.getElementById('range-inputs').style.display = (mode === 'range') ? 'flex' : 'none';
         document.getElementById('specific-weeks-pills').style.display = (mode === 'specific') ? 'flex' : 'none';
@@ -496,8 +741,12 @@
     }
 
     function executeFormatting() {
-        if (!selectedMasterFile) {
+        if (activeSourceMode === 'file' && !selectedMasterFile) {
             showToast('Please select a master CSV file', 'error');
+            return;
+        }
+        if (activeSourceMode === 'paste' && (!pastedRawText || !pastedRawText.trim())) {
+            showToast('Please paste your pin data and click Parse & Inspect first', 'error');
             return;
         }
 
@@ -521,7 +770,11 @@
         btn.textContent = '⏳ Formatting Pins...';
 
         const formData = new FormData();
-        formData.append('file', selectedMasterFile);
+        if (activeSourceMode === 'file') {
+            formData.append('file', selectedMasterFile);
+        } else {
+            formData.append('raw_text', pastedRawText);
+        }
         formData.append('target_template', currentTemplate);
         formData.append('start_week', startWeek);
         formData.append('end_week', endWeek);
