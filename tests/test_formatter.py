@@ -208,6 +208,45 @@ class TestFormatter(unittest.TestCase):
         self.assertIn("paste-input-area", res.text)
         self.assertIn("tab-btn-file", res.text)
 
+    def test_convert_and_queue_batch_naming(self):
+        from src.models.database import get_session_factory, Account, Batch
+        factory = get_session_factory()
+        with factory() as session:
+            acc = session.query(Account).filter(Account.name == "test_acct").first()
+            if not acc:
+                acc = Account(name="test_acct", batch_size=2)
+                session.add(acc)
+                session.commit()
+                acc_id = acc.id
+            else:
+                acc_id = acc.id
+
+        client = TestClient(app)
+        res = client.post(
+            "/api/formatter/convert-and-queue",
+            data={
+                "raw_text": SAMPLE_VERTICAL_PASTE,
+                "account_id": acc_id,
+                "batch_size": 2,
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["batch_count"], 2)
+
+        # Verify batch filenames in database match test_acct_batch_YYYYMMDD_HHMMSS_001.csv
+        with factory() as session:
+            batches = session.query(Batch).filter(Batch.account_id == acc_id).order_by(Batch.id.desc()).limit(2).all()
+            self.assertEqual(len(batches), 2)
+            for b in batches:
+                import re
+                self.assertTrue(
+                    bool(re.match(r"^test_acct_batch_\d{8}_\d{6}_\d{3}\.csv$", b.filename)),
+                    f"Filename {b.filename} did not match expected account_batch_timestamp pattern"
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -215,7 +215,7 @@ def preview_csv(filepath: Path) -> dict:
         return preview
 
 
-def split_csv(filepath: Path, batch_size: int, output_dir: Path) -> list[Path]:
+def split_csv(filepath: Path, batch_size: int, output_dir: Path, prefix: str | None = None) -> list[Path]:
     """Split master CSV into standardized Pinterest batch files (max 100 pins per batch).
 
     Always outputs strictly standardized 8-column comma-separated CSVs:
@@ -224,6 +224,7 @@ def split_csv(filepath: Path, batch_size: int, output_dir: Path) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     delimiter = detect_delimiter(filepath)
     batch_files = []
+    prefix_str = prefix or "batch"
 
     try:
         with open(filepath, "r", encoding="utf-8-sig", errors="replace") as f:
@@ -251,14 +252,14 @@ def split_csv(filepath: Path, batch_size: int, output_dir: Path) -> list[Path]:
                 current_batch_rows.append(standardized_row)
 
                 if len(current_batch_rows) == batch_size:
-                    batch_file = output_dir / f"batch_{batch_num:03d}.csv"
+                    batch_file = output_dir / f"{prefix_str}_{batch_num:03d}.csv"
                     _write_standard_batch(batch_file, current_batch_rows)
                     batch_files.append(batch_file)
                     batch_num += 1
                     current_batch_rows = []
 
             if current_batch_rows:
-                batch_file = output_dir / f"batch_{batch_num:03d}.csv"
+                batch_file = output_dir / f"{prefix_str}_{batch_num:03d}.csv"
                 _write_standard_batch(batch_file, current_batch_rows)
                 batch_files.append(batch_file)
 

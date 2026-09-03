@@ -1271,7 +1271,7 @@ async def reslice_group(data: dict = Body(...)):
 
         highest_done_idx = 0
         for b in done_batches:
-            m = re.search(r"batch_(\d+)", b.filename)
+            m = re.search(r"_(\d+)\.csv$", b.filename) or re.search(r"batch_(\d+)", b.filename)
             if m:
                 highest_done_idx = max(highest_done_idx, int(m.group(1)))
 
@@ -1330,12 +1330,14 @@ async def reslice_group(data: dict = Body(...)):
             except Exception:
                 pass
 
-        # Split into new chunks
+        # Split into new chunks with unique account & timestamp prefix
         chunks = [all_rows[i:i + new_batch_size] for i in range(0, len(all_rows), new_batch_size)]
+        reslice_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        clean_acct = re.sub(r"[^a-zA-Z0-9_\-]", "_", account_name)
 
         for i, chunk in enumerate(chunks):
             idx = start_index + i
-            new_filename = f"batch_{idx:03d}.csv"
+            new_filename = f"{clean_acct}_batch_{reslice_timestamp}_{idx:03d}.csv"
             new_path = queue_dir / new_filename
 
             with open(new_path, "w", encoding="utf-8-sig", newline="") as f:

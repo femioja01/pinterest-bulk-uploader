@@ -1,5 +1,6 @@
 """CSV upload routes — upload, preview, and queue CSVs."""
 
+import re
 import shutil
 import threading
 from datetime import datetime, timezone
@@ -89,7 +90,9 @@ async def queue_upload(
         return JSONResponse({"error": f"Invalid CSV: {error_msg}"}, status_code=400)
 
     batch_size = min(max(batch_size, 1), 100)
-    batch_files = split_csv(master_path, batch_size, dirs["queue"])
+    clean_acct = re.sub(r"[^a-zA-Z0-9_\-]", "_", account_name)
+    batch_prefix = f"{clean_acct}_batch_{timestamp}"
+    batch_files = split_csv(master_path, batch_size, dirs["queue"], prefix=batch_prefix)
 
     done_master = dirs["done"] / master_filename
     shutil.move(str(master_path), str(done_master))
@@ -148,7 +151,9 @@ async def upload_now(
         return JSONResponse({"error": f"Invalid CSV: {error_msg}"}, status_code=400)
 
     batch_size = min(max(batch_size, 1), 100)
-    batch_files = split_csv(master_path, batch_size, dirs["queue"])
+    clean_acct = re.sub(r"[^a-zA-Z0-9_\-]", "_", account_name)
+    batch_prefix = f"{clean_acct}_batch_{timestamp}"
+    batch_files = split_csv(master_path, batch_size, dirs["queue"], prefix=batch_prefix)
 
     done_master = dirs["done"] / master_filename
     shutil.move(str(master_path), str(done_master))

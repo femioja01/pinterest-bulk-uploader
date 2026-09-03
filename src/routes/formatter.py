@@ -196,6 +196,7 @@ async def convert_and_queue_endpoint(
 
         dirs = ensure_account_dirs(account_name)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        clean_acct = re.sub(r"[^a-zA-Z0-9_\-]", "_", account_name)
         orig_clean = (orig_filename or "master").rsplit(".", 1)[0]
         formatted_master_filename = f"master_{timestamp}_{orig_clean}_Official.csv"
         master_path = dirs["pins"] / formatted_master_filename
@@ -203,9 +204,10 @@ async def convert_and_queue_endpoint(
         # Write formatted CSV to pins dir
         out_df.to_csv(master_path, index=False, encoding="utf-8-sig")
 
-        # Split into batches
+        # Split into batches with account & timestamp prefix
         batch_size = min(max(batch_size, 1), 100)
-        batch_files = split_csv(master_path, batch_size, dirs["queue"])
+        batch_prefix = f"{clean_acct}_batch_{timestamp}"
+        batch_files = split_csv(master_path, batch_size, dirs["queue"], prefix=batch_prefix)
 
         done_master = dirs["done"] / formatted_master_filename
         shutil.move(str(master_path), str(done_master))
