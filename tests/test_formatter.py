@@ -200,6 +200,14 @@ class TestFormatter(unittest.TestCase):
         self.assertIn("Title,Media URL,Pinterest Board", content)
         self.assertIn("29 Bottle Crafts: DIY Bottle Crafts for Home Decor & Gifts", content)
 
+    def test_formatter_page_renders(self):
+        client = TestClient(app)
+        res = client.get("/formatter")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("tab-btn-paste", res.text)
+        self.assertIn("paste-input-area", res.text)
+        self.assertIn("tab-btn-file", res.text)
+
 
 if __name__ == "__main__":
     unittest.main()
