@@ -217,7 +217,7 @@ async def trigger_upload(account_id: int):
     def _run():
         try:
             from src.services.scheduler import run_single_account
-            run_single_account(account_name)
+            run_single_account(account_name, force_future=True)
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"Triggered upload failed: {e}")

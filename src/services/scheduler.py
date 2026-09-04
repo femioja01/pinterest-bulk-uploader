@@ -9,6 +9,7 @@ import asyncio
 import threading
 import time
 from datetime import datetime, timezone
+from sqlalchemy import or_
 
 from src.models.database import get_session_factory, Account, Batch, BatchStatus, get_setting
 from src.services.session import check_session
@@ -334,9 +335,13 @@ def run_upload_cycle():
             run_single_account(acct.name, max_batches=1)
 
 
-def run_single_account(account_name: str, max_batches: int = 1):
-    """Run upload for a single account. Drips up to max_batches (default 1) from the queue."""
-    logger.info(f"Executing scheduled/manual upload for account '{account_name}' (max {max_batches} batch)...")
+def run_single_account(account_name: str, max_batches: int = 1, force_future: bool = False):
+    """Run upload for a single account. Drips up to max_batches (default 1) from the queue.
+
+    If force_future is False (default for automated cron runs), batches with a future
+    scheduled_upload_at date are strictly preserved and not uploaded until that time arrives.
+    """
+    logger.info(f"Executing scheduled/manual upload for account '{account_name}' (max {max_batches} batch, force_future={force_future})...")
     session_factory = get_session_factory()
 
     with session_factory() as db_session:
@@ -354,10 +359,20 @@ def run_single_account(account_name: str, max_batches: int = 1):
         account.session_valid = True
         db_session.commit()
 
+        query = db_session.query(Batch).filter_by(account_id=account.id, status=BatchStatus.PENDING)
+
+        if not force_future:
+            now_utc = datetime.now(timezone.utc)
+            # Only pick untimed batches (None) or batches whose scheduled time has arrived (<= now)
+            query = query.filter(
+                or_(
+                    Batch.scheduled_upload_at == None,
+                    Batch.scheduled_upload_at <= now_utc,
+                )
+            )
+
         pending_batches = (
-            db_session.query(Batch)
-            .filter_by(account_id=account.id, status=BatchStatus.PENDING)
-            .order_by(
+            query.order_by(
                 Batch.scheduled_upload_at.asc().nulls_last(),
                 Batch.created_at.asc()
             )
@@ -366,7 +381,7 @@ def run_single_account(account_name: str, max_batches: int = 1):
         )
 
         if not pending_batches:
-            logger.info(f"No pending batches in queue for account '{account_name}'.")
+            logger.info(f"No due batches in queue for account '{account_name}'. (Any future batches remain safely scheduled).")
             return
 
         for batch in pending_batches:
