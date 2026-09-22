@@ -801,7 +801,8 @@ Week 2
                 if (data.success) {
                     showToast(data.message, 'success');
                     renderPreviewTable(data.qa_report.sample_rows, currentTemplate);
-                    setTimeout(() => window.location.href = '/history', 1500);
+                    const targetAcct = data.account_id ? `?account_id=${data.account_id}&view_mode=active` : '?view_mode=active';
+                    setTimeout(() => window.location.href = `/history${targetAcct}`, 1500);
                 } else {
                     showToast(data.error || 'Failed to format and queue', 'error');
                 }

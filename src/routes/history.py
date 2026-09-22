@@ -247,14 +247,25 @@ async def history_page(
         all_matching_batches = query.order_by(Batch.created_at.desc()).all()
         groups_dict = defaultdict(list)
         for b in all_matching_batches:
-            created_minute = b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else ""
-            key = (b.account_id, b.original_filename or "Bulk Upload", created_minute)
-            groups_dict[key].append(b)
+            b_time = b.created_at or datetime.min
+            matched_key = None
+            for key in list(groups_dict.keys()):
+                acct_id, orig_name, rep_time = key
+                if acct_id == b.account_id and (orig_name == (b.original_filename or "Bulk Upload")):
+                    if abs((rep_time - b_time).total_seconds()) <= 300:
+                        matched_key = key
+                        break
+            if matched_key:
+                groups_dict[matched_key].append(b)
+            else:
+                key = (b.account_id, b.original_filename or "Bulk Upload", b_time)
+                groups_dict[key].append(b)
 
         active_groups = []
         archived_groups = []
 
-        for idx, ((acct_id, orig_name, created_str), b_list) in enumerate(groups_dict.items()):
+        for idx, ((acct_id, orig_name, rep_dt), b_list) in enumerate(groups_dict.items()):
+            created_str = rep_dt.strftime("%Y-%m-%d %H:%M") if rep_dt != datetime.min else ""
             total_batches = len(b_list)
             total_pins = sum(b.pin_count for b in b_list)
             done_count = sum(1 for b in b_list if b.status == BatchStatus.DONE)

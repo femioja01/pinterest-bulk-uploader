@@ -213,6 +213,7 @@ async def convert_and_queue_endpoint(
         shutil.move(str(master_path), str(done_master))
 
         # Insert records into DB with accurate pin counts and scheduled upload times
+        now_utc = datetime.now(timezone.utc)
         with factory() as session:
             account = session.query(Account).filter(Account.name == account_name).first()
             for bf in batch_files:
@@ -247,6 +248,7 @@ async def convert_and_queue_endpoint(
                     original_filename=orig_filename,
                     pin_count=max(0, pin_count),
                     status=BatchStatus.PENDING,
+                    created_at=now_utc,
                     scheduled_upload_at=batch_upload_at,
                 )
                 session.add(batch)
@@ -265,6 +267,7 @@ async def convert_and_queue_endpoint(
             "message": f"Successfully formatted {len(out_df)} pins and queued {len(batch_files)} batches of up to {batch_size} pins for '{account_name}'!",
             "total_pins": len(out_df),
             "batch_count": len(batch_files),
+            "account_id": account_id,
             "qa_report": qa_report,
         }
     except Exception as e:
