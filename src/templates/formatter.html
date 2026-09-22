@@ -110,7 +110,10 @@
                         <div>Board: <strong style="color: var(--text-dark);" id="map-board">-</strong></div>
                         <div>Description: <strong style="color: var(--text-dark);" id="map-desc">-</strong></div>
                         <div>Link: <strong style="color: var(--text-dark);" id="map-link">-</strong></div>
-                        <div>Total Rows: <strong style="color: var(--primary);" id="map-total-rows">-</strong></div>
+                        <div>Total Scanned: <strong style="color: var(--text-dark);" id="map-total-rows">-</strong></div>
+                        <div style="grid-column: span 2; border-top: 1px dashed var(--border-color); padding-top: 4px; margin-top: 2px;">
+                            Valid Ready Pins: <strong style="color: #16a34a; font-size: 0.85rem;" id="map-valid-rows">-</strong>
+                        </div>
                     </div>
                 </div>
 
@@ -598,9 +601,21 @@ Week 2
         masterInspectionData = data;
         const statusEl = document.getElementById('inspect-status');
         statusEl.style.display = 'block';
-        statusEl.style.background = '#f0fdf4';
-        statusEl.style.color = '#16a34a';
-        statusEl.textContent = `✅ Successfully mapped columns (${data.total_rows} rows found)`;
+
+        const validRows = data.valid_rows !== undefined ? data.valid_rows : data.total_rows;
+        if (data.valid_rows !== undefined && data.discarded_rows > 0) {
+            statusEl.style.background = '#f0fdf4';
+            statusEl.style.color = '#16a34a';
+            statusEl.textContent = `✅ Mapped columns: ${validRows} valid pins ready (${data.discarded_rows} incomplete rows will be discarded)`;
+        } else if (validRows === 0) {
+            statusEl.style.background = '#fffbeb';
+            statusEl.style.color = '#b45309';
+            statusEl.textContent = `⚠️ All ${data.total_rows} rows are missing at least one required field (pin title, description, board, Article Link, or Media Link).`;
+        } else {
+            statusEl.style.background = '#f0fdf4';
+            statusEl.style.color = '#16a34a';
+            statusEl.textContent = `✅ Successfully mapped columns (${data.total_rows} rows found)`;
+        }
 
         // Populate mapping box
         document.getElementById('mapping-card').style.display = 'block';
@@ -610,6 +625,10 @@ Week 2
         document.getElementById('map-desc').textContent = data.mapped_columns.description || 'Not found';
         document.getElementById('map-link').textContent = data.mapped_columns.link || 'Not found';
         document.getElementById('map-total-rows').textContent = data.total_rows;
+        const validEl = document.getElementById('map-valid-rows');
+        if (validEl) {
+            validEl.textContent = `${validRows} pin${validRows === 1 ? '' : 's'}`;
+        }
 
         // Handle Detected Weeks
         if (data.has_weeks && data.detected_weeks.length > 0) {
@@ -722,7 +741,8 @@ Week 2
 
     function updateActionPreview() {
         if (!masterInspectionData) return;
-        document.getElementById('stat-qa-total').textContent = masterInspectionData.total_rows;
+        const validTotal = masterInspectionData.valid_rows !== undefined ? masterInspectionData.valid_rows : masterInspectionData.total_rows;
+        document.getElementById('stat-qa-total').textContent = validTotal;
         document.getElementById('stat-qa-title').textContent = '≤ 100 chars';
         document.getElementById('stat-qa-desc').textContent = '≤ 500 chars';
         const isSchedule = document.getElementById('chk-auto-schedule').checked;

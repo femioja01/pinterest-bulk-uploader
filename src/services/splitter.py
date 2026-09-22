@@ -7,9 +7,13 @@ strictly for Pinterest's bulk upload tool.
 
 import csv
 import io
+import sys
 import logging
 from pathlib import Path
 from src.config import PINTEREST_CSV_COLUMNS
+
+# Support arbitrarily large CSV fields without buffer overflow
+csv.field_size_limit(sys.maxsize)
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +272,7 @@ def split_csv(filepath: Path, batch_size: int, output_dir: Path, prefix: str | N
 
     except Exception as e:
         logger.error(f"Error splitting CSV {filepath}: {e}")
-        return []
+        raise RuntimeError(f"Failed to split CSV '{filepath.name}': {e}") from e
 
 
 def _write_standard_batch(filepath: Path, rows: list[list[str]]):

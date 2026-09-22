@@ -108,6 +108,16 @@ def is_image_url(s: str) -> bool:
     return bool(re.search(r"(ibb\.co|imgur|cloudinary|\.(jpg|jpeg|png|webp|gif|avif))", s))
 
 
+def is_valid_cell_value(val) -> bool:
+    """Checks whether a cell contains a genuine, non-empty, non-null value."""
+    if pd.isna(val) or val is None:
+        return False
+    s = str(val).strip()
+    if not s or s.lower() in ["nan", "none", "null", "undefined"]:
+        return False
+    return True
+
+
 def parse_pasted_data(text: str) -> pd.DataFrame:
     """Intelligently parses pasted data (TSV, Markdown table, CSV, or vertical line streams) into a DataFrame."""
     text = text.strip()
@@ -325,10 +335,25 @@ def inspect_master_csv(file_bytes_or_path: bytes | Path | str | pd.DataFrame) ->
     if not link_col:
         missing.append("Article Link / Link")
 
+    valid_count = 0
+    if not missing:
+        temp_link = df[link_col].apply(clean_url)
+        temp_media = df[media_col].apply(clean_url)
+        v_mask = (
+            df[title_col].apply(is_valid_cell_value)
+            & df[desc_col].apply(is_valid_cell_value)
+            & df[board_col].apply(is_valid_cell_value)
+            & temp_media.apply(is_valid_cell_value)
+            & temp_link.apply(is_valid_cell_value)
+        )
+        valid_count = int(v_mask.sum())
+
     return {
         "valid": len(missing) == 0,
         "missing_columns": missing,
         "total_rows": total_raw_rows,
+        "valid_rows": valid_count,
+        "discarded_rows": max(0, total_raw_rows - valid_count),
         "columns": columns,
         "has_weeks": len(detected_weeks) > 0,
         "detected_weeks": detected_weeks,
@@ -466,6 +491,28 @@ def format_master_csv(
         ]
         raise ValueError(f"Missing required columns in CSV: {missing}")
 
+    # Clean URLs first (strips markdown syntax like [text](url))
+    df[link_col] = df[link_col].apply(clean_url)
+    df[media_col] = df[media_col].apply(clean_url)
+
+    # Strict row filtering: any row missing Title, Description, Board, Media Link, or Article Link is discarded
+    valid_mask = (
+        df[title_col].apply(is_valid_cell_value)
+        & df[desc_col].apply(is_valid_cell_value)
+        & df[board_col].apply(is_valid_cell_value)
+        & df[media_col].apply(is_valid_cell_value)
+        & df[link_col].apply(is_valid_cell_value)
+    )
+    raw_before_filter = len(df)
+    df = df[valid_mask].copy().reset_index(drop=True)
+    discarded_rows_count = raw_before_filter - len(df)
+
+    if len(df) == 0:
+        raise ValueError(
+            f"No valid rows found to format! Discarded {discarded_rows_count} row(s) because they were missing "
+            f"at least one of the 5 required fields: pin_title, pin_description, board, Article Link, or Media Link."
+        )
+
     # Clean text
     cleaned_titles = df[title_col].apply(lambda x: clean_title(x, max_len=100))
     cleaned_descriptions = df[desc_col].apply(lambda x: clean_description(x, max_len=500))
@@ -528,6 +575,7 @@ def format_master_csv(
     qa_report = {
         "target_template": target_template,
         "total_raw_rows": total_raw_rows,
+        "discarded_rows_count": discarded_rows_count,
         "total_output_pins": len(out_df),
         "max_title_length": int(title_lens.max()) if len(title_lens) > 0 else 0,
         "titles_over_100": int((title_lens > 100).sum()),

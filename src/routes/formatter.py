@@ -209,6 +209,9 @@ async def convert_and_queue_endpoint(
         batch_prefix = f"{clean_acct}_batch_{timestamp}"
         batch_files = split_csv(master_path, batch_size, dirs["queue"], prefix=batch_prefix)
 
+        if not batch_files or len(batch_files) == 0:
+            return JSONResponse({"error": "Failed to split CSV: No batch files were generated."}, status_code=400)
+
         done_master = dirs["done"] / formatted_master_filename
         shutil.move(str(master_path), str(done_master))
 
@@ -254,17 +257,19 @@ async def convert_and_queue_endpoint(
                 session.add(batch)
 
             sched_info = " (with auto-generated publish dates)" if schedule_publish_dates else ""
+            discarded = qa_report.get("discarded_rows_count", 0)
+            discard_info = f" (discarded {discarded} incomplete rows)" if discarded > 0 else ""
             log = ActivityLog(
                 account_id=account.id,
                 event_type="formatted_queue",
-                message=f"Formatted & queued {orig_filename}{sched_info} -> {len(batch_files)} batches ({len(out_df)} pins)",
+                message=f"Formatted & queued {orig_filename}{sched_info}{discard_info} -> {len(batch_files)} batches ({len(out_df)} pins)",
             )
             session.add(log)
             session.commit()
 
         return {
             "success": True,
-            "message": f"Successfully formatted {len(out_df)} pins and queued {len(batch_files)} batches of up to {batch_size} pins for '{account_name}'!",
+            "message": f"Successfully formatted {len(out_df)} pins{discard_info} and queued {len(batch_files)} batches of up to {batch_size} pins for '{account_name}'!",
             "total_pins": len(out_df),
             "batch_count": len(batch_files),
             "account_id": account_id,
