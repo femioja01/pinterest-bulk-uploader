@@ -81,9 +81,17 @@ async def convert_csv_endpoint(
     publish_pins_per_day: int = Form(25),
     publish_daily_start: str = Form("08:00"),
     publish_daily_end: str = Form("22:00"),
+    custom_filename: str = Form(""),
 ):
     """Format master CSV or pasted text into Official Pinterest or Publer Bulk CSV format and return as download."""
     try:
+        def _get_val(val, default):
+            if hasattr(val, "default"):
+                return val.default if val.default is not ... else default
+            return val if val is not None else default
+
+        custom_name_val = str(_get_val(custom_filename, "")).strip()
+
         if file and file.filename:
             content = await file.read()
             orig_name = file.filename or "master_pins.csv"
@@ -93,11 +101,26 @@ async def convert_csv_endpoint(
         else:
             return JSONResponse({"error": "No CSV file uploaded or pasted data provided"}, status_code=400)
 
-        s_week = int(start_week) if start_week.strip().isdigit() else None
-        e_week = int(end_week) if end_week.strip().isdigit() else None
+        if custom_name_val:
+            clean_name = custom_name_val
+            if not clean_name.lower().endswith(".csv"):
+                clean_name += ".csv"
+            orig_name = clean_name
+
+        start_week_val = str(_get_val(start_week, "")).strip()
+        end_week_val = str(_get_val(end_week, "")).strip()
+        spec_weeks_val = str(_get_val(specific_weeks, "")).strip()
+        schedule_publish_dates = bool(_get_val(schedule_publish_dates, False))
+        publish_start_date = str(_get_val(publish_start_date, "")).strip()
+        publish_pins_per_day = int(_get_val(publish_pins_per_day, 25))
+        publish_daily_start = str(_get_val(publish_daily_start, "08:00")).strip()
+        publish_daily_end = str(_get_val(publish_daily_end, "22:00")).strip()
+
+        s_week = int(start_week_val) if start_week_val.isdigit() else None
+        e_week = int(end_week_val) if end_week_val.isdigit() else None
         spec_weeks = None
-        if specific_weeks.strip():
-            spec_weeks = [int(w.strip()) for w in specific_weeks.split(",") if w.strip().isdigit()]
+        if spec_weeks_val:
+            spec_weeks = [int(w.strip()) for w in spec_weeks_val.split(",") if w.strip().isdigit()]
 
         out_df, qa_report = format_master_csv(
             content,
@@ -162,6 +185,7 @@ async def convert_and_queue_endpoint(
     queue_upload_time: str = Form("09:00"),
     queue_first_date: str = Form(""),
     queue_interval_days: int = Form(2),
+    custom_filename: str = Form(""),
 ):
     """Format master CSV or pasted text and immediately split & queue for an account."""
     factory = get_session_factory()
@@ -172,6 +196,13 @@ async def convert_and_queue_endpoint(
         account_name = account.name
 
     try:
+        def _get_val(val, default):
+            if hasattr(val, "default"):
+                return val.default if val.default is not ... else default
+            return val if val is not None else default
+
+        custom_name_val = str(_get_val(custom_filename, "")).strip()
+
         if file and file.filename:
             content = await file.read()
             orig_filename = file.filename
@@ -181,10 +212,11 @@ async def convert_and_queue_endpoint(
         else:
             return JSONResponse({"error": "No CSV file uploaded or pasted data provided"}, status_code=400)
 
-        def _get_val(val, default):
-            if hasattr(val, "default"):
-                return val.default if val.default is not ... else default
-            return val if val is not None else default
+        if custom_name_val:
+            clean_name = custom_name_val
+            if not clean_name.lower().endswith(".csv"):
+                clean_name += ".csv"
+            orig_filename = clean_name
 
         start_week_val = str(_get_val(start_week, "")).strip()
         end_week_val = str(_get_val(end_week, "")).strip()

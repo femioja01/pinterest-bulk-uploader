@@ -64,7 +64,19 @@
                         </div>
                     </div>
                     <textarea id="paste-input-area" class="form-input" rows="8" placeholder="Paste your pins here...&#10;Supports:&#10;• Vertical column lists (from ChatGPT, Notion, Perplexity)&#10;• Google Sheets / Excel copy-paste (TSV)&#10;• Markdown tables (| col |)&#10;• Standard CSV text" style="width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.78rem; line-height: 1.45; padding: 10px; border: 2px solid #cbd5e1; border-radius: 8px; resize: vertical; box-sizing: border-box; background: #ffffff;" oninput="onPasteInputChanged()"></textarea>
-                    <div class="d-flex justify-between align-center" style="margin-top: 8px;">
+
+                    <!-- Optional Custom Name -->
+                    <div style="margin-top: 10px;">
+                        <label for="custom-filename-input" style="font-size: 0.78rem; font-weight: 600; color: var(--text-dark);">
+                            🏷️ Custom Campaign / File Name (Optional):
+                        </label>
+                        <input type="text" id="custom-filename-input" class="form-input" placeholder="e.g. Diet How-to KW Pins (defaults to pasted_pins)" style="width: 100%; margin-top: 3px; padding: 6px 10px; font-size: 0.82rem;">
+                        <p class="text-muted" style="font-size: 0.72rem; margin: 3px 0 0 0;">
+                            Overrides the default &quot;pasted_pins.csv&quot; name for downloaded files and campaign groups in History.
+                        </p>
+                    </div>
+
+                    <div class="d-flex justify-between align-center" style="margin-top: 10px;">
                         <span class="text-muted" style="font-size: 0.72rem;" id="paste-stats-text">0 lines pasted</span>
                         <button type="button" class="btn btn-primary btn-sm" id="btn-parse-paste" style="font-size: 0.78rem; padding: 4px 12px; font-weight: 600;" onclick="handlePasteInspect()">
                             🔍 Parse & Inspect Data
@@ -548,6 +560,8 @@ Week 2
         const area = document.getElementById('paste-input-area');
         area.value = '';
         pastedRawText = '';
+        const customNameEl = document.getElementById('custom-filename-input');
+        if (customNameEl) customNameEl.value = '';
         onPasteInputChanged();
         masterInspectionData = null;
         document.getElementById('inspect-status').style.display = 'none';
@@ -874,6 +888,11 @@ Week 2
         formData.append('publish_pins_per_day', document.getElementById('publish_pins_per_day').value);
         formData.append('publish_daily_start', document.getElementById('publish_daily_start').value);
         formData.append('publish_daily_end', document.getElementById('publish_daily_end').value);
+
+        const customFilename = document.getElementById('custom-filename-input')?.value?.trim();
+        if (customFilename) {
+            formData.append('custom_filename', customFilename);
+        }
 
         if (isDirectQueue) {
             formData.append('account_id', document.getElementById('queue-account-id').value);

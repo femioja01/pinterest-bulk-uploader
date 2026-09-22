@@ -138,6 +138,24 @@ class TestFormatterScheduling(unittest.TestCase):
             b2_dt = batches[1].scheduled_upload_at.replace(tzinfo=timezone.utc).astimezone(tz)
             self.assertEqual(b2_dt.strftime("%Y-%m-%d %H:%M"), "2026-11-13 21:15")
 
+    def test_custom_filename_for_pasted_data(self):
+        """Pasted pins with custom filename overrides pasted_pins.csv."""
+        res = asyncio.run(
+            convert_and_queue_endpoint(
+                file=None,
+                raw_text=SAMPLE_CSV,
+                account_id=self.acc_id,
+                batch_size=2,
+                custom_filename="Diet How-to KW Pins",
+            )
+        )
+        self.assertTrue(res["success"])
+
+        with self.Session() as s:
+            batches = s.query(Batch).filter(Batch.account_id == self.acc_id).all()
+            for b in batches:
+                self.assertEqual(b.original_filename, "Diet How-to KW Pins.csv")
+
 
 if __name__ == "__main__":
     unittest.main()
