@@ -11,12 +11,13 @@ import re
 import csv
 import shutil
 import logging
+import zoneinfo
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from src.models.database import get_session_factory, Account, Batch, BatchStatus, ActivityLog
+from src.models.database import get_session_factory, Account, Batch, BatchStatus, ActivityLog, get_setting
 from src.config import ensure_account_dirs
 from src.services.splitter import split_csv, detect_delimiter
 from src.services.formatter import inspect_master_csv, format_master_csv
@@ -157,6 +158,10 @@ async def convert_and_queue_endpoint(
     publish_pins_per_day: int = Form(25),
     publish_daily_start: str = Form("08:00"),
     publish_daily_end: str = Form("22:00"),
+    queue_schedule_mode: str = Form("default"),
+    queue_upload_time: str = Form("09:00"),
+    queue_first_date: str = Form(""),
+    queue_interval_days: int = Form(2),
 ):
     """Format master CSV or pasted text and immediately split & queue for an account."""
     factory = get_session_factory()
@@ -176,11 +181,29 @@ async def convert_and_queue_endpoint(
         else:
             return JSONResponse({"error": "No CSV file uploaded or pasted data provided"}, status_code=400)
 
-        s_week = int(start_week) if start_week.strip().isdigit() else None
-        e_week = int(end_week) if end_week.strip().isdigit() else None
+        def _get_val(val, default):
+            if hasattr(val, "default"):
+                return val.default if val.default is not ... else default
+            return val if val is not None else default
+
+        start_week_val = str(_get_val(start_week, "")).strip()
+        end_week_val = str(_get_val(end_week, "")).strip()
+        spec_weeks_val = str(_get_val(specific_weeks, "")).strip()
+        schedule_publish_dates = bool(_get_val(schedule_publish_dates, False))
+        publish_start_date = str(_get_val(publish_start_date, "")).strip()
+        publish_pins_per_day = int(_get_val(publish_pins_per_day, 25))
+        publish_daily_start = str(_get_val(publish_daily_start, "08:00")).strip()
+        publish_daily_end = str(_get_val(publish_daily_end, "22:00")).strip()
+        queue_schedule_mode = str(_get_val(queue_schedule_mode, "default")).strip()
+        queue_upload_time = str(_get_val(queue_upload_time, "09:00")).strip()
+        queue_first_date = str(_get_val(queue_first_date, "")).strip()
+        queue_interval_days = int(_get_val(queue_interval_days, 2))
+
+        s_week = int(start_week_val) if start_week_val.isdigit() else None
+        e_week = int(end_week_val) if end_week_val.isdigit() else None
         spec_weeks = None
-        if specific_weeks.strip():
-            spec_weeks = [int(w.strip()) for w in specific_weeks.split(",") if w.strip().isdigit()]
+        if spec_weeks_val:
+            spec_weeks = [int(w.strip()) for w in spec_weeks_val.split(",") if w.strip().isdigit()]
 
         out_df, qa_report = format_master_csv(
             content,
@@ -219,7 +242,37 @@ async def convert_and_queue_endpoint(
         now_utc = datetime.now(timezone.utc)
         with factory() as session:
             account = session.query(Account).filter(Account.name == account_name).first()
-            for bf in batch_files:
+            tz_str = get_setting(session, "timezone", "Africa/Lagos")
+            try:
+                tz = zoneinfo.ZoneInfo(tz_str)
+            except Exception:
+                tz = zoneinfo.ZoneInfo("Africa/Lagos")
+
+            # Parse custom upload time of day
+            target_hour = 9
+            target_minute = 0
+            if queue_upload_time and ":" in queue_upload_time:
+                try:
+                    parts = queue_upload_time.strip().split(":")
+                    target_hour = max(0, min(23, int(parts[0])))
+                    target_minute = max(0, min(59, int(parts[1])))
+                except Exception:
+                    target_hour = 9
+                    target_minute = 0
+
+            # Base date for unscheduled pins if custom schedule mode is selected
+            manual_start_date = None
+            interval_days = max(1, queue_interval_days)
+            if queue_schedule_mode == "custom" and not schedule_publish_dates:
+                if queue_first_date and queue_first_date.strip():
+                    try:
+                        manual_start_date = datetime.strptime(queue_first_date.strip(), "%Y-%m-%d").date()
+                    except Exception:
+                        manual_start_date = datetime.now(tz).date() + timedelta(days=1)
+                else:
+                    manual_start_date = datetime.now(tz).date() + timedelta(days=1)
+
+            for idx, bf in enumerate(batch_files):
                 pin_count = 0
                 first_publish_date_str = None
                 delim = detect_delimiter(bf)
@@ -235,15 +288,29 @@ async def convert_and_queue_endpoint(
                                 if val:
                                     first_publish_date_str = val
 
-                # If publish date exists on the pin, set batch upload time to upload prior to that date
                 batch_upload_at = None
-                if first_publish_date_str:
-                    try:
-                        # e.g. 2026-08-30T08:00:00 -> scheduled upload at 08:00 AM on that day
-                        p_dt = datetime.strptime(first_publish_date_str.split("T")[0], "%Y-%m-%d")
-                        batch_upload_at = p_dt.replace(hour=8, minute=0, second=0)
-                    except Exception:
-                        pass
+                if queue_schedule_mode == "custom":
+                    if first_publish_date_str:
+                        # Auto-interval: derive date from first pin in batch, set to chosen upload time of day
+                        try:
+                            date_part = first_publish_date_str.split("T")[0]
+                            p_date = datetime.strptime(date_part, "%Y-%m-%d")
+                            naive_dt = p_date.replace(hour=target_hour, minute=target_minute, second=0)
+                            local_dt = naive_dt.replace(tzinfo=tz)
+                            batch_upload_at = local_dt.astimezone(timezone.utc)
+                        except Exception as e:
+                            logger.warning(f"Could not parse publish date '{first_publish_date_str}' for batch {bf.name}: {e}")
+                    elif manual_start_date:
+                        # Manual cadence: start_date + idx * interval_days at chosen upload time of day
+                        curr_date = manual_start_date + timedelta(days=idx * interval_days)
+                        naive_dt = datetime.combine(curr_date, datetime.min.time()).replace(
+                            hour=target_hour, minute=target_minute, second=0
+                        )
+                        local_dt = naive_dt.replace(tzinfo=tz)
+                        batch_upload_at = local_dt.astimezone(timezone.utc)
+                else:
+                    # Account default cadence
+                    batch_upload_at = None
 
                 batch = Batch(
                     account_id=account.id,
@@ -256,7 +323,13 @@ async def convert_and_queue_endpoint(
                 )
                 session.add(batch)
 
-            sched_info = " (with auto-generated publish dates)" if schedule_publish_dates else ""
+            if queue_schedule_mode == "custom":
+                sched_info = f" (scheduled at {target_hour:02d}:{target_minute:02d} {tz_str})"
+            elif schedule_publish_dates:
+                sched_info = " (with auto-generated publish dates, account cadence)"
+            else:
+                sched_info = ""
+
             discarded = qa_report.get("discarded_rows_count", 0)
             discard_info = f" (discarded {discarded} incomplete rows)" if discarded > 0 else ""
             log = ActivityLog(
@@ -267,9 +340,10 @@ async def convert_and_queue_endpoint(
             session.add(log)
             session.commit()
 
+        time_info = f" scheduled for upload at {target_hour:02d}:{target_minute:02d} ({tz_str})" if queue_schedule_mode == "custom" else " using account default schedule"
         return {
             "success": True,
-            "message": f"Successfully formatted {len(out_df)} pins{discard_info} and queued {len(batch_files)} batches of up to {batch_size} pins for '{account_name}'!",
+            "message": f"Successfully formatted {len(out_df)} pins{discard_info} and queued {len(batch_files)} batches of up to {batch_size} pins for '{account_name}'{time_info}!",
             "total_pins": len(out_df),
             "batch_count": len(batch_files),
             "account_id": account_id,

@@ -230,6 +230,49 @@
                             <label for="queue-batch-size" style="font-size: 0.8rem; font-weight: 600;">Batch Slice Size (max 100 pins):</label>
                             <input type="number" id="queue-batch-size" class="form-input" min="1" max="100" value="50" style="width: 100%; margin-top: 4px;">
                         </div>
+
+                        <!-- Upload Timing & Schedule Section -->
+                        <div style="margin-top: 14px; border-top: 1px solid var(--border-color); padding-top: 12px;">
+                            <label style="font-size: 0.8rem; font-weight: 600; display: block; margin-bottom: 6px;">Batch Upload Timing:</label>
+                            <div class="d-flex gap-3" style="margin-bottom: 8px;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.82rem;">
+                                    <input type="radio" name="queue_schedule_mode" id="queue-mode-default" value="default" checked onchange="toggleQueueScheduleMode()">
+                                    <span>Account Default (e.g. 9:00 AM)</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.82rem;">
+                                    <input type="radio" name="queue_schedule_mode" id="queue-mode-custom" value="custom" onchange="toggleQueueScheduleMode()">
+                                    <span style="font-weight: 600; color: var(--primary);">Choose Upload Time</span>
+                                </label>
+                            </div>
+
+                            <!-- Custom Upload Schedule Settings -->
+                            <div id="queue-custom-schedule-box" style="display: none; background: #ffffff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 12px; margin-top: 8px;">
+                                <div class="form-group" style="margin-bottom: 8px;">
+                                    <label for="queue-upload-time" style="font-size: 0.78rem; font-weight: 600; color: var(--text-dark);">Upload Time of Day:</label>
+                                    <input type="time" id="queue-upload-time" class="form-input" value="09:00" style="width: 100%; margin-top: 2px; padding: 5px 8px; font-size: 0.85rem;" onchange="updateActionPreview()">
+                                    <p class="text-muted" style="font-size: 0.72rem; margin: 3px 0 0 0;">
+                                        The exact time of day batches will be uploaded to Pinterest (e.g. 09:00, 14:30, 21:00).
+                                    </p>
+                                </div>
+
+                                <!-- Manual Interval Settings (shown when Auto Publish Dates is unchecked) -->
+                                <div id="queue-manual-cadence-box" style="display: none; margin-top: 10px; border-top: 1px dashed #cbd5e1; padding-top: 10px;">
+                                    <div class="form-group" style="margin-bottom: 8px;">
+                                        <label for="queue-first-upload-date" style="font-size: 0.78rem; font-weight: 600;">First Batch Upload Date:</label>
+                                        <input type="date" id="queue-first-upload-date" class="form-input" value="{{ default_start_date }}" style="width: 100%; margin-top: 2px; padding: 5px 8px; font-size: 0.85rem;">
+                                    </div>
+                                    <div class="form-group" style="margin-bottom: 0;">
+                                        <label for="queue-interval-days" style="font-size: 0.78rem; font-weight: 600;">Upload Interval between Batches (Days):</label>
+                                        <input type="number" id="queue-interval-days" class="form-input" min="1" max="30" value="2" style="width: 100%; margin-top: 2px; padding: 5px 8px; font-size: 0.85rem;">
+                                    </div>
+                                </div>
+
+                                <!-- Auto Interval Notice (shown when Auto Publish Dates is checked) -->
+                                <div id="queue-auto-cadence-note" style="font-size: 0.74rem; color: #1e40af; background: #eff6ff; border-radius: 4px; padding: 6px 8px; margin-top: 8px;">
+                                    ℹ️ <strong>Auto-Interval Active:</strong> Batch upload dates are automatically derived from your <em>Pins per Day</em> &amp; <em>Batch Slice Size</em>, uploading at your chosen time above.
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -713,6 +756,7 @@ Week 2
     function toggleAutoScheduleOptions() {
         const isChecked = document.getElementById('chk-auto-schedule').checked;
         document.getElementById('auto-schedule-fields').style.display = isChecked ? 'block' : 'none';
+        syncQueueCadenceView();
         updateActionPreview();
     }
 
@@ -736,7 +780,32 @@ Week 2
     function toggleDirectQueueOptions() {
         const isChecked = document.getElementById('chk-direct-queue').checked;
         document.getElementById('direct-queue-fields').style.display = isChecked ? 'block' : 'none';
+        syncQueueCadenceView();
         updateActionPreview();
+    }
+
+    function toggleQueueScheduleMode() {
+        const isCustom = document.getElementById('queue-mode-custom')?.checked;
+        const box = document.getElementById('queue-custom-schedule-box');
+        if (box) box.style.display = isCustom ? 'block' : 'none';
+        syncQueueCadenceView();
+        updateActionPreview();
+    }
+
+    function syncQueueCadenceView() {
+        const isAutoSchedule = document.getElementById('chk-auto-schedule')?.checked;
+        const manualBox = document.getElementById('queue-manual-cadence-box');
+        const autoNote = document.getElementById('queue-auto-cadence-note');
+
+        if (manualBox && autoNote) {
+            if (isAutoSchedule) {
+                manualBox.style.display = 'none';
+                autoNote.style.display = 'block';
+            } else {
+                manualBox.style.display = 'block';
+                autoNote.style.display = 'none';
+            }
+        }
     }
 
     function updateActionPreview() {
@@ -809,6 +878,12 @@ Week 2
         if (isDirectQueue) {
             formData.append('account_id', document.getElementById('queue-account-id').value);
             formData.append('batch_size', document.getElementById('queue-batch-size').value);
+
+            const scheduleMode = document.getElementById('queue-mode-custom')?.checked ? 'custom' : 'default';
+            formData.append('queue_schedule_mode', scheduleMode);
+            formData.append('queue_upload_time', document.getElementById('queue-upload-time')?.value || '09:00');
+            formData.append('queue_first_date', document.getElementById('queue-first-upload-date')?.value || '');
+            formData.append('queue_interval_days', document.getElementById('queue-interval-days')?.value || '2');
 
             fetch('/api/formatter/convert-and-queue', {
                 method: 'POST',
