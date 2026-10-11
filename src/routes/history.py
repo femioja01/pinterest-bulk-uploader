@@ -1654,3 +1654,183 @@ async def append_to_card(
         temp_path.unlink(missing_ok=True)
         logger.error(f"Error appending to card: {e}")
         return JSONResponse({"error": f"Failed to append to card: {e}"}, status_code=500)
+
+
+@router.post("/api/history/{batch_id}/recalculate-publish-dates", response_class=JSONResponse)
+async def recalculate_batch_publish_dates(batch_id: int, request: Request):
+    """
+    Overwrites the 'Publish Date' column in a specific pending batch's CSV
+    with evenly spaced timestamps between active hours.
+    """
+    from src.services.formatter import repopulate_batch_publish_dates
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    start_date_str = str(body.get("start_date") or "").strip()
+    pins_per_day = int(body.get("pins_per_day") or 25)
+    daily_start = str(body.get("daily_start") or "08:00").strip()
+    daily_end = str(body.get("daily_end") or "22:00").strip()
+
+    factory = get_session_factory()
+    with factory() as session:
+        batch = session.query(Batch).filter(Batch.id == batch_id).first()
+        if not batch:
+            return JSONResponse({"error": "Batch not found"}, status_code=404)
+
+        if batch.status != BatchStatus.PENDING:
+            return JSONResponse({"error": f"Can only update publish dates for pending batches (current status: {batch.status.value})"}, status_code=400)
+
+        account = session.query(Account).filter(Account.id == batch.account_id).first()
+        if not account:
+            return JSONResponse({"error": "Account not found"}, status_code=404)
+
+        account_name = account.name
+        batch_filename = str(batch.filename)
+        dirs = get_account_dir(account_name)
+        csv_file = dirs / "queue" / batch_filename
+        if not csv_file.exists():
+            return JSONResponse({"error": f"Batch file not found in queue: {batch_filename}"}, status_code=404)
+
+        # Default start date if omitted: batch's scheduled_upload_at date or tomorrow
+        if not start_date_str:
+            if batch.scheduled_upload_at:
+                start_date_str = batch.scheduled_upload_at.strftime("%Y-%m-%d")
+            else:
+                start_date_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        try:
+            total_updated, first_dt, last_dt = repopulate_batch_publish_dates(
+                csv_path=csv_file,
+                start_date_str=start_date_str,
+                pins_per_day=pins_per_day,
+                daily_start=daily_start,
+                daily_end=daily_end,
+                date_format="iso",
+            )
+        except Exception as e:
+            return JSONResponse({"error": f"Failed to recalculate publish dates: {e}"}, status_code=500)
+
+        session.add(ActivityLog(
+            account_id=account.id,
+            event_type="publish_dates_recalculated",
+            message=f"Repopulated publish dates for {batch_filename}: {total_updated} pins from {first_dt} to {last_dt}",
+        ))
+        session.commit()
+
+    return {
+        "success": True,
+        "message": f"Successfully updated {total_updated} publish dates for {batch_filename}!",
+        "batch_id": batch_id,
+        "filename": batch_filename,
+        "pins_updated": total_updated,
+        "first_publish_date": first_dt,
+        "last_publish_date": last_dt,
+    }
+
+
+@router.post("/api/history/campaign/recalculate-all-publish-dates", response_class=JSONResponse)
+async def recalculate_campaign_all_publish_dates(request: Request):
+    """
+    Overwrites the 'Publish Date' column across ALL pending batches in a campaign card,
+    evenly spacing them consecutively with no overlap or gaps.
+    """
+    from src.services.formatter import repopulate_batch_publish_dates
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    account_id = body.get("account_id")
+    campaign_id = str(body.get("campaign_id") or "").strip()
+    card_name = str(body.get("card_name") or body.get("original_filename") or "").strip()
+    start_date_str = str(body.get("start_date") or "").strip()
+    pins_per_day = int(body.get("pins_per_day") or 25)
+    daily_start = str(body.get("daily_start") or "08:00").strip()
+    daily_end = str(body.get("daily_end") or "22:00").strip()
+
+    if not account_id:
+        return JSONResponse({"error": "Account ID is required"}, status_code=400)
+
+    factory = get_session_factory()
+    with factory() as session:
+        account = session.query(Account).filter(Account.id == account_id).first()
+        if not account:
+            return JSONResponse({"error": "Account not found"}, status_code=404)
+
+        query = session.query(Batch).filter(
+            Batch.account_id == account_id,
+            Batch.status == BatchStatus.PENDING,
+        )
+        if campaign_id:
+            query = query.filter(Batch.campaign_id == campaign_id)
+        elif card_name:
+            query = query.filter(Batch.original_filename == card_name)
+        else:
+            return JSONResponse({"error": "Either campaign_id or card_name must be provided"}, status_code=400)
+
+        pending_batches = query.order_by(Batch.id.asc()).all()
+        if not pending_batches:
+            return JSONResponse({"error": "No pending batches found in this campaign card to update."}, status_code=404)
+
+        # Default start date if omitted
+        if not start_date_str:
+            first_b = pending_batches[0]
+            if first_b.scheduled_upload_at:
+                start_date_str = first_b.scheduled_upload_at.strftime("%Y-%m-%d")
+            else:
+                start_date_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        dirs = get_account_dir(account.name)
+        total_batches_processed = 0
+        total_pins_updated = 0
+        current_cursor_date = datetime.strptime(start_date_str[:10], "%Y-%m-%d").date()
+        overall_first_date = ""
+        overall_last_date = ""
+
+        for b in pending_batches:
+            csv_file = dirs / "queue" / str(b.filename)
+            if not csv_file.exists():
+                continue
+
+            try:
+                pins_in_batch, f_dt, l_dt = repopulate_batch_publish_dates(
+                    csv_path=csv_file,
+                    start_date_str=current_cursor_date.strftime("%Y-%m-%d"),
+                    pins_per_day=pins_per_day,
+                    daily_start=daily_start,
+                    daily_end=daily_end,
+                    date_format="iso",
+                )
+                if pins_in_batch > 0:
+                    if not overall_first_date:
+                        overall_first_date = f_dt
+                    overall_last_date = l_dt
+                    total_batches_processed += 1
+                    total_pins_updated += pins_in_batch
+
+                    # Advance cursor date past the days used by this batch
+                    days_used = max(1, (pins_in_batch + pins_per_day - 1) // pins_per_day)
+                    current_cursor_date += timedelta(days=days_used)
+            except Exception as e:
+                logger.error(f"Error recalculating publish dates for batch {b.filename}: {e}")
+
+        session.add(ActivityLog(
+            account_id=account.id,
+            event_type="publish_dates_recalculated",
+            message=f"Repopulated publish dates for campaign '{card_name or campaign_id}': {total_pins_updated} pins across {total_batches_processed} batches from {overall_first_date} to {overall_last_date}",
+        ))
+        session.commit()
+
+    return {
+        "success": True,
+        "message": f"Successfully updated publish dates for {total_batches_processed} batches ({total_pins_updated} pins)!",
+        "batches_updated": total_batches_processed,
+        "total_pins": total_pins_updated,
+        "first_publish_date": overall_first_date,
+        "last_publish_date": overall_last_date,
+    }
+

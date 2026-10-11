@@ -593,3 +593,55 @@ def format_master_csv(
 
     return out_df, qa_report
 
+
+def repopulate_batch_publish_dates(
+    csv_path: Path | str,
+    start_date_str: str,
+    pins_per_day: int = 25,
+    daily_start: str = "08:00",
+    daily_end: str = "22:00",
+    date_format: str = "iso",
+) -> tuple[int, str, str]:
+    """
+    Overwrites the 'Publish Date' column of an existing CSV file with evenly distributed timestamps.
+    Returns (total_updated, first_date, last_date).
+    """
+    p = Path(csv_path)
+    if not p.exists():
+        raise FileNotFoundError(f"File not found: {csv_path}")
+
+    df = pd.read_csv(p, encoding_errors="replace", dtype=str)
+    
+    # Locate publish date column
+    pub_col = None
+    for c in df.columns:
+        if c.strip().lower() in ["publish date", "publish_date", "date"]:
+            pub_col = c
+            break
+
+    if not pub_col:
+        # Default to Pinterest standard column name if not found
+        pub_col = "Publish Date"
+        df[pub_col] = ""
+
+    total_pins = len(df)
+    if total_pins == 0:
+        return 0, "", ""
+
+    new_dates = generate_pin_publish_dates(
+        total_pins=total_pins,
+        start_date_str=start_date_str,
+        pins_per_day=pins_per_day,
+        daily_start=daily_start,
+        daily_end=daily_end,
+        date_format=date_format,
+    )
+
+    df[pub_col] = new_dates
+    df.to_csv(p, index=False, encoding="utf-8-sig")
+
+    first_date = new_dates[0] if new_dates else ""
+    last_date = new_dates[-1] if new_dates else ""
+    return total_pins, first_date, last_date
+
+

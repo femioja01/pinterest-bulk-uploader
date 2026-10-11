@@ -118,6 +118,9 @@
                     <button class="btn btn-secondary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); openGroupRescheduleModal({{ group.account_id }}, '{{ group.original_filename }}', {{ group.pending_count }})" title="Reschedule all pending batches in this master campaign">
                         ⏱️ Reschedule Queue ({{ group.pending_count }})
                     </button>
+                    <button class="btn btn-secondary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); openRepopulateModalForCampaign('{{ group.campaign_id }}', {{ group.account_id }}, '{{ group.original_filename }}', {{ group.pending_count }})" title="Evenly re-space Pinterest Publish Dates for all pending batches in this campaign">
+                        📅 Repopulate Publish Dates ({{ group.pending_count }})
+                    </button>
                     <button class="btn btn-secondary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); openResliceModal({{ group.account_id }}, '{{ group.original_filename }}', {{ group.pending_count }}, {{ group.pending_pins }})" title="Re-slice remaining unuploaded pins into new batch sizes (e.g. from 90 to 60 pins/batch)">
                         ✂️ Re-slice Queue ({{ group.pending_pins }} pins)
                     </button>
@@ -272,6 +275,7 @@
                                 <div class="d-flex gap-2">
                                     {% if batch.status == 'pending' %}
                                     <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Upload this batch to Pinterest immediately">🚀 Upload Now</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openRepopulateModalForSingleBatch({{ batch.id }}, '{{ batch.filename }}', '{{ batch.raw_scheduled_time }}')" title="Re-populate Publish Date column inside this CSV with evenly spaced timestamps">📅 Repopulate Dates</button>
                                     <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); cancelBatch({{ batch.id }})" title="Cancel this scheduled batch">Cancel</button>
                                     {% elif batch.status == 'cancelled' %}
                                     <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Upload this batch to Pinterest immediately">🚀 Upload Now</button>
@@ -489,6 +493,7 @@
                         <div class="d-flex gap-2">
                             {% if batch.status == 'pending' %}
                             <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Upload this batch to Pinterest immediately">🚀 Upload Now</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openRepopulateModalForSingleBatch({{ batch.id }}, '{{ batch.filename }}', '{{ batch.raw_scheduled_time }}')" title="Re-populate Publish Date column inside this CSV with evenly spaced timestamps">📅 Repopulate Dates</button>
                             <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); cancelBatch({{ batch.id }})" title="Cancel this scheduled batch">Cancel</button>
                             {% elif batch.status == 'cancelled' %}
                             <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Upload this batch to Pinterest immediately">🚀 Upload Now</button>
@@ -879,6 +884,72 @@
             <button type="button" class="btn btn-primary" id="btn-save-append-pins" onclick="submitAppendPins()">
                 ➕ Append Pins to Card
             </button>
+<!-- MODAL: REPOPULATE PUBLISH DATES -->
+<div id="modal-repopulate-dates" class="modal-overlay" style="display: none; position: fixed; inset: 0; width: 100%; height: 100%; background: rgba(15,23,42,0.65); z-index: 99999; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+    <div class="modal" style="background: #ffffff; border-radius: 12px; width: 90%; max-width: 520px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.25); overflow: hidden; transform: translateY(0);">
+        <!-- Modal Header -->
+        <div class="modal-header d-flex justify-between align-center" style="padding: 16px 22px; border-bottom: 1px solid var(--border-color); background: #f8fafc;">
+            <div>
+                <h3 style="margin: 0; font-size: 1.15rem; color: var(--text-dark);" id="repopulate-modal-title">📅 Repopulate Pin Publish Dates</h3>
+                <div class="text-muted" style="font-size: 0.82rem; margin-top: 3px;" id="repopulate-modal-subtitle">Target: ...</div>
+            </div>
+            <button type="button" class="btn btn-ghost" onclick="closeRepopulateModal()" style="font-size: 1.2rem; line-height: 1; padding: 4px 8px; border: none; background: transparent; cursor: pointer;">✕</button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="modal-body" style="padding: 20px 22px;">
+            <p class="text-muted" style="font-size: 0.84rem; margin-top: 0; margin-bottom: 16px; line-height: 1.45;">
+                Automatically rewrites the <strong>Publish date</strong> column in the batch CSV with evenly spaced timestamps across your active hours.
+            </p>
+
+            <!-- Start Date -->
+            <div class="form-group" style="margin-bottom: 16px;">
+                <label for="repopulate-start-date"><strong>Starting Date (First Pin):</strong></label>
+                <input type="date" id="repopulate-start-date" class="form-input" style="width: 100%; margin-top: 6px;">
+                <p class="text-muted" style="font-size: 0.78rem; margin-top: 4px;">
+                    Date when the first pin in this batch will be published on Pinterest.
+                </p>
+            </div>
+
+            <!-- Active Hours Window -->
+            <div class="form-group" style="margin-bottom: 16px;">
+                <label><strong>Daily Active Time Window:</strong></label>
+                <div class="d-flex gap-2 align-center" style="margin-top: 6px;">
+                    <div style="flex: 1;">
+                        <span class="text-muted" style="font-size: 0.78rem; display: block; margin-bottom: 2px;">Earliest Pin:</span>
+                        <input type="time" id="repopulate-daily-start" class="form-input" value="08:00" style="width: 100%;">
+                    </div>
+                    <span style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted); margin-top: 14px;">to</span>
+                    <div style="flex: 1;">
+                        <span class="text-muted" style="font-size: 0.78rem; display: block; margin-bottom: 2px;">Latest Pin:</span>
+                        <input type="time" id="repopulate-daily-end" class="form-input" value="22:00" style="width: 100%;">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pins Per Day Drip Rate -->
+            <div class="form-group" style="margin-bottom: 12px;">
+                <label for="repopulate-pins-per-day"><strong>Pins Per Day:</strong></label>
+                <div class="d-flex gap-2 align-center" style="margin-top: 6px;">
+                    <input type="number" id="repopulate-pins-per-day" class="form-input" min="1" max="100" value="25" style="width: 100px; font-weight: 600;">
+                    <div class="d-flex gap-1">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('repopulate-pins-per-day').value=15">15</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('repopulate-pins-per-day').value=25">25</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('repopulate-pins-per-day').value=50">50</button>
+                    </div>
+                </div>
+                <p class="text-muted" style="font-size: 0.78rem; margin-top: 4px;">
+                    Timestamps will be spaced evenly throughout your active hours each day.
+                </p>
+            </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-footer d-flex justify-between align-center" style="padding: 14px 22px; border-top: 1px solid var(--border-color); background: #f8fafc;">
+            <button type="button" class="btn btn-secondary" onclick="closeRepopulateModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-save-repopulate-dates" onclick="submitRepopulatePublishDates()">
+                💾 Apply Publish Dates
+            </button>
         </div>
     </div>
 </div>
@@ -1099,6 +1170,140 @@
             btn.disabled = false;
             btn.textContent = '➕ Append Pins to Card';
             showToast('Network error while appending pins to card', 'error');
+        });
+    }
+
+    // Repopulate Publish Dates Modal State
+    let repopulateScope = 'single'; // 'single' or 'campaign'
+    let repopulateBatchId = null;
+    let repopulateCampaignId = null;
+    let repopulateAccountId = null;
+    let repopulateCardName = null;
+
+    function openRepopulateModalForSingleBatch(batchId, filename, rawScheduledTime) {
+        repopulateScope = 'single';
+        repopulateBatchId = batchId;
+        repopulateCampaignId = null;
+        repopulateAccountId = null;
+        repopulateCardName = null;
+
+        const modal = document.getElementById('modal-repopulate-dates');
+        if (!modal) return;
+
+        document.getElementById('repopulate-modal-title').textContent = '📅 Repopulate Pin Publish Dates';
+        document.getElementById('repopulate-modal-subtitle').textContent = `Batch: ${filename}`;
+
+        // Populate start date input
+        const dateInput = document.getElementById('repopulate-start-date');
+        if (dateInput) {
+            if (rawScheduledTime && rawScheduledTime.length >= 10) {
+                dateInput.value = rawScheduledTime.substring(0, 10);
+            } else {
+                const now = new Date();
+                now.setDate(now.getDate() + 1);
+                dateInput.value = now.toISOString().substring(0, 10);
+            }
+        }
+
+        modal.classList.add('active');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
+    }
+
+    function openRepopulateModalForCampaign(campaignId, accountId, cardName, pendingCount) {
+        repopulateScope = 'campaign';
+        repopulateBatchId = null;
+        repopulateCampaignId = campaignId;
+        repopulateAccountId = accountId;
+        repopulateCardName = cardName;
+
+        const modal = document.getElementById('modal-repopulate-dates');
+        if (!modal) return;
+
+        document.getElementById('repopulate-modal-title').textContent = `📅 Repopulate Dates (${pendingCount} Pending Batches)`;
+        document.getElementById('repopulate-modal-subtitle').textContent = `Campaign: ${cardName}`;
+
+        const dateInput = document.getElementById('repopulate-start-date');
+        if (dateInput) {
+            const now = new Date();
+            now.setDate(now.getDate() + 1);
+            dateInput.value = now.toISOString().substring(0, 10);
+        }
+
+        modal.classList.add('active');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
+    }
+
+    function closeRepopulateModal() {
+        const modal = document.getElementById('modal-repopulate-dates');
+        if (modal) {
+            modal.classList.remove('active');
+            modal.style.setProperty('display', 'none', 'important');
+            modal.style.setProperty('opacity', '0', 'important');
+            modal.style.setProperty('visibility', 'hidden', 'important');
+        }
+        repopulateBatchId = null;
+        repopulateCampaignId = null;
+        repopulateAccountId = null;
+        repopulateCardName = null;
+    }
+
+    function submitRepopulatePublishDates() {
+        const startDate = document.getElementById('repopulate-start-date').value;
+        if (!startDate) {
+            showToast('Please select a starting date', 'error');
+            return;
+        }
+
+        const dailyStart = document.getElementById('repopulate-daily-start').value || '08:00';
+        const dailyEnd = document.getElementById('repopulate-daily-end').value || '22:00';
+        const pinsPerDay = parseInt(document.getElementById('repopulate-pins-per-day').value, 10) || 25;
+
+        const btn = document.getElementById('btn-save-repopulate-dates');
+        btn.disabled = true;
+        btn.textContent = '⏳ Updating CSV...';
+
+        let url = '';
+        let payload = {
+            start_date: startDate,
+            daily_start: dailyStart,
+            daily_end: dailyEnd,
+            pins_per_day: pinsPerDay
+        };
+
+        if (repopulateScope === 'single') {
+            url = `/api/history/${repopulateBatchId}/recalculate-publish-dates`;
+        } else {
+            url = '/api/history/campaign/recalculate-all-publish-dates';
+            payload.account_id = repopulateAccountId;
+            payload.campaign_id = repopulateCampaignId;
+            payload.card_name = repopulateCardName;
+        }
+
+        fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.textContent = '💾 Apply Publish Dates';
+            if (data.success) {
+                showToast(data.message || 'Publish dates updated successfully!', 'success');
+                closeRepopulateModal();
+                setTimeout(() => window.location.reload(), 900);
+            } else {
+                showToast(data.error || 'Failed to update publish dates', 'error');
+            }
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.textContent = '💾 Apply Publish Dates';
+            showToast('Network error while updating publish dates', 'error');
         });
     }
 
@@ -1891,6 +2096,12 @@
                 if (e.target === appendModal) closeAppendPinsModal();
             });
         }
+        const repopulateModal = document.getElementById('modal-repopulate-dates');
+        if (repopulateModal) {
+            repopulateModal.addEventListener('click', (e) => {
+                if (e.target === repopulateModal) closeRepopulateModal();
+            });
+        }
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeRescheduleModal();
@@ -1898,6 +2109,7 @@
                 closeBatchPreview();
                 closeRenameCardModal();
                 closeAppendPinsModal();
+                closeRepopulateModal();
             }
         });
     });
