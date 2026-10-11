@@ -100,12 +100,14 @@ async def queue_upload(
     factory = get_session_factory()
     with factory() as session:
         account = session.query(Account).filter(Account.name == account_name).first()
+        campaign_id = f"camp_{account.id}_{timestamp}"
         for bf in batch_files:
             row_count = count_rows(bf)
             batch = Batch(
                 account_id=account.id,
                 filename=bf.name,
                 original_filename=file.filename,
+                campaign_id=campaign_id,
                 pin_count=row_count,
                 status=BatchStatus.PENDING,
             )
@@ -161,12 +163,14 @@ async def upload_now(
     factory = get_session_factory()
     with factory() as session:
         account = session.query(Account).filter(Account.name == account_name).first()
+        campaign_id = f"camp_{account.id}_{timestamp}"
         for bf in batch_files:
             row_count = count_rows(bf)
             batch = Batch(
                 account_id=account.id,
                 filename=bf.name,
                 original_filename=file.filename,
+                campaign_id=campaign_id,
                 pin_count=row_count,
                 status=BatchStatus.PENDING,
             )

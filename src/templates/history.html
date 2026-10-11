@@ -26,14 +26,9 @@
     <div class="card-body" style="padding: 14px 20px;">
         <form method="GET" action="/history" id="filter-form" class="d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px;">
             <input type="hidden" name="view_mode" id="view_mode_input" value="{{ view_mode }}">
+            <input type="hidden" name="account_id" id="account_id_input" value="{{ filter_account_id or 0 }}">
             
             <div class="d-flex gap-3 align-center" style="flex-wrap: wrap;">
-                <select name="account_id" class="form-select" style="width: 200px;" onchange="this.form.submit()">
-                    <option value="0">All Accounts</option>
-                    {% for acc in accounts %}
-                    <option value="{{ acc.id }}" {% if filter_account_id == acc.id %}selected{% endif %}>{{ acc.name }}</option>
-                    {% endfor %}
-                </select>
                 <select name="status" class="form-select" style="width: 160px;" onchange="this.form.submit()">
                     <option value="">All Statuses</option>
                     <option value="done" {% if filter_status == 'done' %}selected{% endif %}>Done</option>
@@ -60,6 +55,25 @@
                 </button>
             </div>
         </form>
+
+        <!-- Account Quick Filter Pills & Realtime Search (for managing 7+ accounts) -->
+        <div class="d-flex align-center justify-between gap-2" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-color); flex-wrap: wrap;">
+            <div class="d-flex align-center gap-1" style="flex-wrap: wrap;">
+                <span style="font-size: 0.78rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-right: 4px;">Accounts:</span>
+                <button type="button" class="btn btn-sm {% if not filter_account_id %}btn-primary{% else %}btn-secondary{% endif %}" onclick="selectAccountFilter(0)" style="border-radius: 20px; padding: 3px 12px; font-size: 0.78rem;">
+                    All ({% if view_mode == 'archived' %}{{ archived_count }}{% else %}{{ active_count }}{% endif %})
+                </button>
+                {% for acc in accounts %}
+                <button type="button" class="btn btn-sm {% if filter_account_id == acc.id %}btn-primary{% else %}btn-secondary{% endif %}" onclick="selectAccountFilter({{ acc.id }})" style="border-radius: 20px; padding: 3px 12px; font-size: 0.78rem;">
+                    👤 {{ acc.name }}{% if account_active_counts and account_active_counts.get(acc.id, 0) > 0 %} <span style="background: rgba(0,0,0,0.12); padding: 1px 6px; border-radius: 10px; font-size: 0.72rem; margin-left: 3px;">{{ account_active_counts.get(acc.id, 0) }}</span>{% endif %}
+                </button>
+                {% endfor %}
+            </div>
+
+            <div>
+                <input type="text" id="card-search-input" class="form-input" placeholder="🔍 Search cards by name..." style="font-size: 0.82rem; padding: 5px 12px; width: 220px; border-radius: 20px;" oninput="filterCardsRealtime(this.value)">
+            </div>
+        </div>
     </div>
 </div>
 
@@ -67,7 +81,7 @@
 <!-- TAB 1: ACTIVE MASTER CAMPAIGNS -->
 <div class="master-groups-container">
     {% for group in active_groups %}
-    <div class="card" style="margin-bottom: 20px; border: 1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+    <div class="card master-group-card" data-card-title="{{ group.original_filename | lower }}" data-account-name="{{ group.account_name | lower }}" style="margin-bottom: 20px; border: 1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
         <!-- Master Card Header -->
         <div class="card-body" style="padding: 20px 24px; cursor: pointer;" onclick="toggleGroupDetails('{{ group.group_id }}')">
             <div class="d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
@@ -81,12 +95,19 @@
                     <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.74rem; padding: 2px 7px; height: auto;" data-group-id="{{ group.group_id }}" data-account-id="{{ group.account_id }}" data-card-name="{{ group.original_filename }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerRenameCardModal(this)" title="Rename this campaign card">
                         ✏️ Rename
                     </button>
+                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.74rem; padding: 2px 8px; height: auto;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
+                        ➕ Add Pins
+                    </button>
                     <span class="text-muted" style="font-size: 0.82rem;">
                         • Uploaded: {{ group.created_at }}
                     </span>
                 </div>
 
                 <div class="d-flex gap-2 align-center" style="flex-wrap: wrap;">
+                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.78rem;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
+                        ➕ Add Pins
+                    </button>
+
                     {% if group.pending_count > 0 and group.first_pending_id %}
                     <button class="btn btn-primary btn-sm" style="font-size: 0.78rem;" onclick="event.stopPropagation(); uploadNowBatch({{ group.first_pending_id }})" title="Immediately upload the next pending batch in line">
                         🚀 Upload Next Now
@@ -292,7 +313,7 @@
 <!-- TAB 2: COMPLETED & ARCHIVED MASTER CAMPAIGNS -->
 <div class="master-groups-container">
     {% for group in archived_groups %}
-    <div class="card" style="margin-bottom: 20px; border: 1px solid var(--border-color); border-left: 4px solid var(--success); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+    <div class="card master-group-card" data-card-title="{{ group.original_filename | lower }}" data-account-name="{{ group.account_name | lower }}" style="margin-bottom: 20px; border: 1px solid var(--border-color); border-left: 4px solid var(--success); box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
         <!-- Master Card Header -->
         <div class="card-body" style="padding: 20px 24px; cursor: pointer;" onclick="toggleGroupDetails('{{ group.group_id }}')">
             <div class="d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px;">
@@ -306,12 +327,18 @@
                     <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.74rem; padding: 2px 7px; height: auto;" data-group-id="{{ group.group_id }}" data-account-id="{{ group.account_id }}" data-card-name="{{ group.original_filename }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerRenameCardModal(this)" title="Rename this campaign card">
                         ✏️ Rename
                     </button>
+                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.74rem; padding: 2px 8px; height: auto;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
+                        ➕ Add Pins
+                    </button>
                     <span class="text-muted" style="font-size: 0.82rem;">
                         • Account: <strong>{{ group.account_name }}</strong> • Uploaded: {{ group.created_at }}
                     </span>
                 </div>
 
                 <div class="d-flex gap-2 align-center">
+                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.8rem;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
+                        ➕ Add Pins
+                    </button>
                     <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.8rem;" data-group-id="{{ group.group_id }}" data-account-id="{{ group.account_id }}" data-card-name="{{ group.original_filename }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerRenameCardModal(this)" title="Rename this campaign card">
                         ✏️ Rename Card
                     </button>
@@ -754,6 +781,108 @@
     </div>
 </div>
 
+<!-- MODAL: ADD PINS / CSV TO EXISTING CAMPAIGN CARD -->
+<div id="modal-append-pins" class="modal-overlay" style="display: none; position: fixed; inset: 0; width: 100%; height: 100%; background: rgba(15,23,42,0.65); z-index: 99999; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+    <div class="modal" style="background: #ffffff; border-radius: 12px; width: 90%; max-width: 580px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.25); overflow: hidden; transform: translateY(0); max-height: 90vh; display: flex; flex-direction: column;">
+        <!-- Modal Header -->
+        <div class="modal-header d-flex justify-between align-center" style="padding: 16px 22px; border-bottom: 1px solid var(--border-color); background: #f8fafc; flex-shrink: 0;">
+            <div>
+                <h3 style="margin: 0; font-size: 1.15rem; color: var(--text-dark);">➕ Add Pins to Campaign Card</h3>
+                <div class="text-muted" style="font-size: 0.82rem; margin-top: 3px;" id="append-modal-subtitle">
+                    Campaign: ... • Account: ...
+                </div>
+            </div>
+            <button type="button" class="btn btn-ghost" onclick="closeAppendPinsModal()" style="font-size: 1.2rem; line-height: 1; padding: 4px 8px; border: none; background: transparent; cursor: pointer;">✕</button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="modal-body" style="padding: 20px 22px; overflow-y: auto;">
+            <!-- Input Mode Selector -->
+            <div class="d-flex gap-2" style="margin-bottom: 16px; background: #f1f5f9; padding: 4px; border-radius: 8px;">
+                <button type="button" class="btn btn-sm btn-primary" id="btn-append-mode-file" onclick="setAppendInputMode('file')" style="flex: 1; border: none; font-weight: 600;">
+                    📁 Upload CSV File
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary" id="btn-append-mode-paste" onclick="setAppendInputMode('paste')" style="flex: 1; border: none; font-weight: 600;">
+                    📋 Paste Pin Data
+                </button>
+            </div>
+
+            <!-- Mode 1: File Upload -->
+            <div id="append-file-container" style="margin-bottom: 18px;">
+                <label for="append-file-input"><strong>Select CSV File:</strong></label>
+                <input type="file" id="append-file-input" class="form-input" accept=".csv" style="width: 100%; margin-top: 6px; padding: 8px;">
+                <p class="text-muted" style="font-size: 0.78rem; margin-top: 4px;">
+                    Supports Pinterest 8-column standard CSVs or raw pin spreadsheets (auto-detected).
+                </p>
+            </div>
+
+            <!-- Mode 2: Paste Pin Data -->
+            <div id="append-paste-container" style="display: none; margin-bottom: 18px;">
+                <label for="append-paste-input"><strong>Paste Pin Data (TSV / CSV / Raw):</strong></label>
+                <textarea id="append-paste-input" class="form-input" rows="5" style="width: 100%; margin-top: 6px; font-family: monospace; font-size: 0.8rem;" placeholder="Paste pin data here..."></textarea>
+            </div>
+
+            <!-- Batch Size Selection -->
+            <div class="form-group" style="margin-bottom: 18px;">
+                <label for="append-batch-size"><strong>Batch Size (pins per new batch):</strong></label>
+                <div class="d-flex gap-2 align-center" style="margin-top: 6px;">
+                    <input type="number" id="append-batch-size" class="form-input" min="1" max="100" value="50" style="width: 100px; font-weight: 600;">
+                    <div class="d-flex gap-1">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('append-batch-size').value=25">25</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('append-batch-size').value=50">50</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('append-batch-size').value=75">75</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('append-batch-size').value=100">100</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Queue Scheduling Strategy -->
+            <div class="form-group" style="margin-bottom: 18px; background: #f8fafc; border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
+                <label style="margin-bottom: 8px; display: block;"><strong>Upload Scheduling for New Batches:</strong></label>
+                
+                <div id="append-continue-option-group" style="margin-bottom: 10px;">
+                    <label class="d-flex align-center gap-2" style="cursor: pointer; font-size: 0.9rem;">
+                        <input type="radio" name="append_schedule_mode" value="continue" id="append-mode-continue" checked onchange="toggleAppendScheduleInputs()">
+                        <span><strong>Continue existing cadence</strong> (starts right after the last queued batch)</span>
+                    </label>
+                </div>
+
+                <div style="margin-bottom: 10px;">
+                    <label class="d-flex align-center gap-2" style="cursor: pointer; font-size: 0.9rem;">
+                        <input type="radio" name="append_schedule_mode" value="custom" id="append-mode-custom" onchange="toggleAppendScheduleInputs()">
+                        <span><strong>Set custom start date & time</strong></span>
+                    </label>
+                </div>
+
+                <div id="append-custom-datetime-container" style="display: none; margin-top: 10px; padding-left: 22px;">
+                    <input type="datetime-local" id="append-custom-datetime" class="form-input" style="width: 100%; font-size: 0.9rem;">
+                </div>
+
+                <!-- Spacing Interval -->
+                <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border-color);">
+                    <label for="append-interval-select" style="font-size: 0.85rem; display: block; margin-bottom: 4px;"><strong>Upload Spacing Interval:</strong></label>
+                    <select id="append-interval-select" class="form-select" style="width: 100%; font-size: 0.88rem;">
+                        <option value="1_days">Every 1 Day (24 Hours - Daily)</option>
+                        <option value="2_days" selected>Every 2 Days (48 Hours - Recommended)</option>
+                        <option value="3_days">Every 3 Days (72 Hours)</option>
+                        <option value="4_days">Every 4 Days</option>
+                        <option value="7_days">Every 1 Week (7 Days)</option>
+                        <option value="12_hours">Every 12 Hours (Twice Daily)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-footer d-flex justify-between align-center" style="padding: 14px 22px; border-top: 1px solid var(--border-color); background: #f8fafc; flex-shrink: 0;">
+            <button type="button" class="btn btn-secondary" onclick="closeAppendPinsModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-save-append-pins" onclick="submitAppendPins()">
+                ➕ Append Pins to Card
+            </button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -767,6 +896,211 @@
     let renameCardAccountId = null;
     let renameCardOldName = null;
     let renameCardBatchIds = [];
+
+    // Append Pins Modal State
+    let appendCampaignId = null;
+    let appendAccountId = null;
+    let appendCardName = null;
+    let appendPendingCount = 0;
+    let appendInputMode = 'file';
+
+    function selectAccountFilter(accId) {
+        document.getElementById('account_id_input').value = accId;
+        document.getElementById('filter-form').submit();
+    }
+
+    function filterCardsRealtime(query) {
+        const q = (query || '').trim().toLowerCase();
+        const cards = document.querySelectorAll('.master-group-card');
+        cards.forEach(card => {
+            const title = card.getAttribute('data-card-title') || '';
+            const acc = card.getAttribute('data-account-name') || '';
+            if (!q || title.includes(q) || acc.includes(q)) {
+                card.style.display = '';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    }
+
+    function triggerAppendPinsModal(btn) {
+        const campaignId = btn.getAttribute('data-campaign-id') || '';
+        const accountId = parseInt(btn.getAttribute('data-account-id'), 10);
+        const accountName = btn.getAttribute('data-account-name') || '';
+        const cardName = btn.getAttribute('data-card-name') || '';
+        const pendingCount = parseInt(btn.getAttribute('data-pending-count') || '0', 10);
+        openAppendPinsModal(campaignId, accountId, accountName, cardName, pendingCount);
+    }
+
+    function openAppendPinsModal(campaignId, accountId, accountName, cardName, pendingCount) {
+        appendCampaignId = campaignId;
+        appendAccountId = accountId;
+        appendCardName = cardName;
+        appendPendingCount = pendingCount || 0;
+
+        const modal = document.getElementById('modal-append-pins');
+        if (!modal) return;
+
+        document.getElementById('append-modal-subtitle').textContent = `Campaign: ${cardName} • Account: ${accountName}`;
+        
+        // Reset file and paste inputs
+        const fileInput = document.getElementById('append-file-input');
+        if (fileInput) fileInput.value = '';
+        const pasteInput = document.getElementById('append-paste-input');
+        if (pasteInput) pasteInput.value = '';
+
+        setAppendInputMode('file');
+
+        // Configure continuation option depending on whether card has queued pending batches
+        const continueGroup = document.getElementById('append-continue-option-group');
+        const continueRadio = document.getElementById('append-mode-continue');
+        const customRadio = document.getElementById('append-mode-custom');
+
+        if (appendPendingCount > 0) {
+            if (continueGroup) continueGroup.style.display = 'block';
+            if (continueRadio) continueRadio.checked = true;
+        } else {
+            // Archived or no pending batches - must select start date/time
+            if (continueGroup) continueGroup.style.display = 'none';
+            if (customRadio) customRadio.checked = true;
+        }
+
+        // Set default datetime to tomorrow 9am if not already set
+        const dtInput = document.getElementById('append-custom-datetime');
+        if (dtInput) {
+            const now = new Date();
+            now.setHours(9, 0, 0, 0);
+            now.setDate(now.getDate() + 1);
+            const tzOffset = now.getTimezoneOffset() * 60000;
+            dtInput.value = new Date(now.getTime() - tzOffset).toISOString().substring(0, 16);
+        }
+
+        toggleAppendScheduleInputs();
+
+        modal.classList.add('active');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
+    }
+
+    function closeAppendPinsModal() {
+        const modal = document.getElementById('modal-append-pins');
+        if (modal) {
+            modal.classList.remove('active');
+            modal.style.setProperty('display', 'none', 'important');
+            modal.style.setProperty('opacity', '0', 'important');
+            modal.style.setProperty('visibility', 'hidden', 'important');
+        }
+        appendCampaignId = null;
+        appendAccountId = null;
+        appendCardName = null;
+        appendPendingCount = 0;
+    }
+
+    function setAppendInputMode(mode) {
+        appendInputMode = mode;
+        const btnFile = document.getElementById('btn-append-mode-file');
+        const btnPaste = document.getElementById('btn-append-mode-paste');
+        const fileContainer = document.getElementById('append-file-container');
+        const pasteContainer = document.getElementById('append-paste-container');
+
+        if (mode === 'file') {
+            if (btnFile) { btnFile.className = 'btn btn-sm btn-primary'; }
+            if (btnPaste) { btnPaste.className = 'btn btn-sm btn-secondary'; }
+            if (fileContainer) fileContainer.style.display = 'block';
+            if (pasteContainer) pasteContainer.style.display = 'none';
+        } else {
+            if (btnFile) { btnFile.className = 'btn btn-sm btn-secondary'; }
+            if (btnPaste) { btnPaste.className = 'btn btn-sm btn-primary'; }
+            if (fileContainer) fileContainer.style.display = 'none';
+            if (pasteContainer) pasteContainer.style.display = 'block';
+            const pasteInput = document.getElementById('append-paste-input');
+            if (pasteInput) setTimeout(() => pasteInput.focus(), 50);
+        }
+    }
+
+    function toggleAppendScheduleInputs() {
+        const customChecked = document.getElementById('append-mode-custom') && document.getElementById('append-mode-custom').checked;
+        const container = document.getElementById('append-custom-datetime-container');
+        if (container) {
+            container.style.display = customChecked ? 'block' : 'none';
+        }
+    }
+
+    function submitAppendPins() {
+        if (!appendAccountId || !appendCardName) {
+            showToast('Invalid card target', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('account_id', appendAccountId);
+        formData.append('original_filename', appendCardName);
+        if (appendCampaignId) {
+            formData.append('campaign_id', appendCampaignId);
+        }
+
+        const batchSize = parseInt(document.getElementById('append-batch-size').value, 10) || 50;
+        formData.append('batch_size', batchSize);
+
+        const scheduleModeEl = document.querySelector('input[name="append_schedule_mode"]:checked');
+        const scheduleMode = scheduleModeEl ? scheduleModeEl.value : 'custom';
+        formData.append('schedule_mode', scheduleMode);
+
+        const customDt = document.getElementById('append-custom-datetime').value;
+        if (scheduleMode === 'custom' && !customDt) {
+            showToast('Please select a target start date and time', 'error');
+            return;
+        }
+        if (customDt) {
+            formData.append('custom_start_time', customDt);
+        }
+
+        const interval = document.getElementById('append-interval-select').value || '2_days';
+        formData.append('interval_spacing', interval);
+
+        if (appendInputMode === 'file') {
+            const fileInput = document.getElementById('append-file-input');
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showToast('Please select a CSV file to append', 'error');
+                return;
+            }
+            formData.append('file', fileInput.files[0]);
+        } else {
+            const pasteData = (document.getElementById('append-paste-input').value || '').trim();
+            if (!pasteData) {
+                showToast('Please enter or paste pin data', 'error');
+                return;
+            }
+            formData.append('paste_data', pasteData);
+        }
+
+        const btn = document.getElementById('btn-save-append-pins');
+        btn.disabled = true;
+        btn.textContent = '⏳ Appending Batches...';
+
+        fetch('/api/history/append-to-card', {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.textContent = '➕ Append Pins to Card';
+            if (data.success) {
+                showToast(data.message || 'Pins successfully added to card!', 'success');
+                closeAppendPinsModal();
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                showToast(data.error || 'Failed to append pins', 'error');
+            }
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.textContent = '➕ Append Pins to Card';
+            showToast('Network error while appending pins to card', 'error');
+        });
+    }
 
     function triggerRenameCardModal(btn) {
         const groupId = btn.getAttribute('data-group-id');
@@ -1551,12 +1885,19 @@
                 if (e.target === renameModal) closeRenameCardModal();
             });
         }
+        const appendModal = document.getElementById('modal-append-pins');
+        if (appendModal) {
+            appendModal.addEventListener('click', (e) => {
+                if (e.target === appendModal) closeAppendPinsModal();
+            });
+        }
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeRescheduleModal();
                 closeResliceModal();
                 closeBatchPreview();
                 closeRenameCardModal();
+                closeAppendPinsModal();
             }
         });
     });

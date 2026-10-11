@@ -219,7 +219,7 @@ def preview_csv(filepath: Path) -> dict:
         return preview
 
 
-def split_csv(filepath: Path, batch_size: int, output_dir: Path, prefix: str | None = None) -> list[Path]:
+def split_csv(filepath: Path, batch_size: int, output_dir: Path, prefix: str | None = None, start_batch_num: int = 1) -> list[Path]:
     """Split master CSV into standardized Pinterest batch files (max 100 pins per batch).
 
     Always outputs strictly standardized 8-column comma-separated CSVs:
@@ -236,7 +236,7 @@ def split_csv(filepath: Path, batch_size: int, output_dir: Path, prefix: str | N
             raw_header = next(reader)
             normalized_headers = [_normalize_header_name(h) for h in raw_header]
 
-            batch_num = 1
+            batch_num = max(1, start_batch_num)
             current_batch_rows = []
 
             for row in reader:

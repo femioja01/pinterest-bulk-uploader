@@ -5,11 +5,12 @@ import csv
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import zoneinfo
+import re
 import shutil
 import threading
 import logging
 import asyncio
-from fastapi import APIRouter, Request, Query, Body
+from fastapi import APIRouter, Request, Query, Body, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from src.models.database import get_session_factory, get_setting, Account, Batch, BatchStatus, ActivityLog
@@ -243,28 +244,35 @@ async def history_page(
                 "error_message": b.error_message or "",
             })
 
-        # Build Master Groups (all matching batches grouped by master upload)
+        # Build Master Groups (all matching batches grouped by campaign_id or master upload)
         all_matching_batches = query.order_by(Batch.created_at.desc()).all()
         groups_dict = defaultdict(list)
         for b in all_matching_batches:
             b_time = b.created_at or datetime.min
             matched_key = None
             for key in list(groups_dict.keys()):
-                acct_id, orig_name, rep_time = key
-                if acct_id == b.account_id and (orig_name == (b.original_filename or "Bulk Upload")):
-                    if abs((rep_time - b_time).total_seconds()) <= 300:
+                acct_id, cid, orig_name, rep_time = key
+                if acct_id == b.account_id:
+                    # 1. Exact campaign_id match
+                    if b.campaign_id and cid and b.campaign_id == cid:
                         matched_key = key
                         break
+                    # 2. Clustered by original_filename within 5 mins for legacy batches without campaign_id
+                    elif not b.campaign_id and (orig_name == (b.original_filename or "Bulk Upload")):
+                        if abs((rep_time - b_time).total_seconds()) <= 300:
+                            matched_key = key
+                            break
             if matched_key:
                 groups_dict[matched_key].append(b)
             else:
-                key = (b.account_id, b.original_filename or "Bulk Upload", b_time)
+                cid = b.campaign_id or f"camp_{b.account_id}_{int(b_time.timestamp())}_{b.id}"
+                key = (b.account_id, cid, b.original_filename or "Bulk Upload", b_time)
                 groups_dict[key].append(b)
 
         active_groups = []
         archived_groups = []
 
-        for idx, ((acct_id, orig_name, rep_dt), b_list) in enumerate(groups_dict.items()):
+        for idx, ((acct_id, cid, orig_name, rep_dt), b_list) in enumerate(groups_dict.items()):
             created_str = rep_dt.strftime("%Y-%m-%d %H:%M") if rep_dt != datetime.min else ""
             total_batches = len(b_list)
             total_pins = sum(b.pin_count for b in b_list)
@@ -300,6 +308,7 @@ async def history_page(
 
             group_data = {
                 "group_id": f"group_{idx}_{acct_id}",
+                "campaign_id": cid,
                 "account_id": acct_id,
                 "account_name": account_name_map.get(acct_id, "Unknown"),
                 "original_filename": orig_name,
@@ -324,6 +333,11 @@ async def history_page(
             else:
                 active_groups.append(group_data)
 
+        # Count active campaigns per account for quick filter tabs
+        account_active_counts = defaultdict(int)
+        for g in active_groups:
+            account_active_counts[g["account_id"]] += 1
+
     return templates.TemplateResponse(
         request,
         "history.html",
@@ -336,6 +350,7 @@ async def history_page(
             "archived_count": len(archived_groups),
             "total_batches_count": total,
             "accounts": account_list,
+            "account_active_counts": dict(account_active_counts),
             "filter_account_id": account_id,
             "filter_status": status,
             "view_mode": view_mode,
@@ -1446,3 +1461,196 @@ async def rename_card(data: dict = Body(...)):
         session.commit()
 
     return {"success": True, "message": f"Successfully renamed card to '{new_name}'!"}
+
+
+@router.post("/api/history/append-to-card")
+async def append_to_card(
+    account_id: int = Form(...),
+    card_name: str = Form(""),
+    original_filename: str = Form(""),
+    campaign_id: str = Form(""),
+    batch_size: int = Form(50),
+    schedule_mode: str = Form("continue"),
+    custom_start_datetime: str = Form(""),
+    custom_start_time: str = Form(""),
+    interval_value: int = Form(2),
+    interval_unit: str = Form("days"),
+    interval_spacing: str = Form(""),
+    file: UploadFile = File(None),
+    pasted_data: str = Form(""),
+    paste_data: str = Form(""),
+):
+    """Append new pins / CSV to an existing campaign card."""
+    card_name = card_name or original_filename
+    pasted_data = pasted_data or paste_data
+    custom_start_datetime = custom_start_datetime or custom_start_time
+
+    if interval_spacing:
+        # e.g. "2_days", "12_hours"
+        parts = interval_spacing.split("_")
+        if len(parts) == 2:
+            try:
+                interval_value = int(parts[0])
+                interval_unit = parts[1]
+            except ValueError:
+                pass
+    from src.config import ensure_account_dirs
+    from src.services.splitter import validate_csv, split_csv, count_rows
+    from src.services.formatter import inspect_master_csv, format_master_csv
+
+    factory = get_session_factory()
+    with factory() as session:
+        account = session.query(Account).filter(Account.id == account_id).first()
+        if not account:
+            return JSONResponse({"error": "Account not found"}, status_code=404)
+        account_name = account.name
+
+        query = session.query(Batch).filter(Batch.account_id == account_id)
+        if campaign_id:
+            existing_batches = query.filter(Batch.campaign_id == campaign_id).all()
+        else:
+            existing_batches = query.filter(Batch.original_filename == card_name).all()
+
+        if not existing_batches:
+            return JSONResponse({"error": "Target campaign card not found."}, status_code=404)
+
+        target_campaign_id = campaign_id or existing_batches[0].campaign_id or f"camp_{account_id}_{int(datetime.now(timezone.utc).timestamp())}"
+        target_card_name = card_name or existing_batches[0].original_filename or "Bulk Upload"
+
+        # Backfill campaign_id on any legacy batches for this card
+        for eb in existing_batches:
+            if not eb.campaign_id:
+                eb.campaign_id = target_campaign_id
+        session.commit()
+
+        existing_pending = [b for b in existing_batches if b.status == BatchStatus.PENDING and b.scheduled_upload_at]
+        tz_str = get_setting(session, "timezone", "Africa/Lagos")
+
+    try:
+        tz = zoneinfo.ZoneInfo(tz_str)
+    except Exception:
+        tz = zoneinfo.ZoneInfo("Africa/Lagos")
+
+    dirs = ensure_account_dirs(account_name)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    temp_path = dirs["pins"] / f"append_temp_{timestamp}.csv"
+
+    # Save uploaded file or pasted data
+    if file and file.filename:
+        content = await file.read()
+        if not content:
+            return JSONResponse({"error": "Uploaded file is empty."}, status_code=400)
+        temp_path.write_bytes(content)
+    elif pasted_data and pasted_data.strip():
+        temp_path.write_text(pasted_data.strip(), encoding="utf-8")
+    else:
+        return JSONResponse({"error": "Please provide a CSV file or paste pin data."}, status_code=400)
+
+    try:
+        # Validate or auto-convert
+        is_valid_std, err = validate_csv(temp_path)
+        if not is_valid_std:
+            insp = inspect_master_csv(temp_path)
+            if insp.get("valid"):
+                formatted_df, _ = format_master_csv(temp_path)
+                formatted_df.to_csv(temp_path, index=False, encoding="utf-8-sig")
+                is_valid_std, err = validate_csv(temp_path)
+
+        if not is_valid_std:
+            temp_path.unlink(missing_ok=True)
+            return JSONResponse({"error": f"Invalid CSV data: {err}"}, status_code=400)
+
+        total_new_pins = count_rows(temp_path)
+        if total_new_pins == 0:
+            temp_path.unlink(missing_ok=True)
+            return JSONResponse({"error": "CSV contains no data rows."}, status_code=400)
+
+        batch_size = min(max(batch_size, 1), 100)
+        start_batch_num = len(existing_batches) + 1
+        clean_acct = re.sub(r"[^a-zA-Z0-9_\-]", "_", account_name)
+        batch_prefix = f"{clean_acct}_batch_{timestamp}"
+
+        new_batch_files = split_csv(
+            temp_path,
+            batch_size,
+            dirs["queue"],
+            prefix=batch_prefix,
+            start_batch_num=start_batch_num,
+        )
+
+        # Calculate scheduling spacing
+        if interval_unit == "hours":
+            step_delta = timedelta(hours=interval_value)
+        else:
+            step_delta = timedelta(days=interval_value)
+
+        first_scheduled_at = None
+        if schedule_mode == "continue" and existing_pending:
+            latest_pending_dt = max(b.scheduled_upload_at for b in existing_pending)
+            first_scheduled_at = latest_pending_dt + step_delta
+        elif custom_start_datetime:
+            try:
+                naive_dt = datetime.strptime(custom_start_datetime[:16], "%Y-%m-%dT%H:%M")
+                first_scheduled_at = naive_dt.replace(tzinfo=tz).astimezone(timezone.utc)
+            except Exception as e:
+                logger.warning(f"Could not parse custom start datetime '{custom_start_datetime}': {e}")
+
+        if not first_scheduled_at:
+            now_local = datetime.now(tz)
+            tomorrow_local = (now_local + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+            first_scheduled_at = tomorrow_local.astimezone(timezone.utc)
+
+        with factory() as session:
+            for idx, nbf in enumerate(new_batch_files):
+                r_count = count_rows(nbf)
+                batch_upload_time = first_scheduled_at + (idx * step_delta)
+                nb = Batch(
+                    account_id=account_id,
+                    filename=nbf.name,
+                    original_filename=target_card_name,
+                    campaign_id=target_campaign_id,
+                    pin_count=r_count,
+                    status=BatchStatus.PENDING,
+                    scheduled_upload_at=batch_upload_time,
+                    created_at=datetime.now(timezone.utc),
+                )
+                session.add(nb)
+
+            # Append new data to existing master CSV file on disk if found
+            for subdir in ["done", "pins"]:
+                sub_path = dirs.get(subdir)
+                if sub_path and sub_path.exists():
+                    for candidate in list(sub_path.glob(f"*{target_card_name}*")):
+                        if candidate.is_file() and not candidate.name.startswith("batch_"):
+                            try:
+                                with open(temp_path, "r", encoding="utf-8-sig") as src_f, open(candidate, "a", encoding="utf-8-sig", newline="") as dst_f:
+                                    reader = csv.reader(src_f)
+                                    next(reader, None)  # skip header
+                                    writer = csv.writer(dst_f)
+                                    for r in reader:
+                                        writer.writerow(r)
+                            except Exception as e:
+                                logger.warning(f"Could not append to master file on disk {candidate}: {e}")
+
+            session.add(ActivityLog(
+                account_id=account_id,
+                event_type="batch_appended",
+                message=f"Appended {total_new_pins} pins in {len(new_batch_files)} batches to campaign card '{target_card_name}'",
+            ))
+            session.commit()
+
+        temp_path.unlink(missing_ok=True)
+
+        return {
+            "success": True,
+            "message": f"Successfully added {total_new_pins} pins in {len(new_batch_files)} new batches to '{target_card_name}'!",
+            "new_batch_count": len(new_batch_files),
+            "batches_created": len(new_batch_files),
+            "total_pins": total_new_pins,
+            "pins_count": total_new_pins,
+        }
+
+    except Exception as e:
+        temp_path.unlink(missing_ok=True)
+        logger.error(f"Error appending to card: {e}")
+        return JSONResponse({"error": f"Failed to append to card: {e}"}, status_code=500)

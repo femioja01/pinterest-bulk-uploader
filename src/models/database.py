@@ -46,6 +46,7 @@ class Batch(Base):
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
     filename = Column(String(255), nullable=False)
     original_filename = Column(String(255), nullable=True)
+    campaign_id = Column(String(100), nullable=True, index=True)
     pin_count = Column(Integer, default=0)
     status = Column(Enum(BatchStatus), default=BatchStatus.PENDING)
     error_message = Column(Text, nullable=True)
@@ -117,6 +118,9 @@ def init_db():
             columns_b = [row[1] for row in result_b.fetchall()]
             if "scheduled_upload_at" not in columns_b:
                 conn.execute(text("ALTER TABLE batches ADD COLUMN scheduled_upload_at DATETIME"))
+                conn.commit()
+            if "campaign_id" not in columns_b:
+                conn.execute(text("ALTER TABLE batches ADD COLUMN campaign_id VARCHAR(100)"))
                 conn.commit()
         except Exception:
             pass

@@ -348,6 +348,7 @@ async def convert_and_queue_endpoint(
                     account_id=account.id,
                     filename=bf.name,
                     original_filename=orig_filename,
+                    campaign_id=f"camp_{account.id}_{timestamp}",
                     pin_count=max(0, pin_count),
                     status=BatchStatus.PENDING,
                     created_at=now_utc,
