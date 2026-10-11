@@ -283,6 +283,7 @@
                                     <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
                                     {% elif batch.status == 'failed' %}
                                     <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Retry uploading this batch now">🚀 Upload Now</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openRepopulateModalForSingleBatch({{ batch.id }}, '{{ batch.filename }}', '{{ batch.raw_scheduled_time }}')" title="Re-populate Publish Date column inside this failed CSV with fresh evenly spaced timestamps">📅 Repopulate Dates</button>
                                     <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
                                     {% endif %}
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openBatchPreview({{ batch.id }})" title="Preview and copy data from this batch">👁️ Preview</button>
@@ -501,6 +502,7 @@
                             <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
                             {% elif batch.status == 'failed' %}
                             <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); uploadNowBatch({{ batch.id }})" title="Retry uploading this batch now">🚀 Upload Now</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openRepopulateModalForSingleBatch({{ batch.id }}, '{{ batch.filename }}', '{{ batch.raw_scheduled_time }}')" title="Re-populate Publish Date column inside this failed CSV with fresh evenly spaced timestamps">📅 Repopulate Dates</button>
                             <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
                             {% endif %}
                             <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openBatchPreview({{ batch.id }})" title="Preview and copy data from this batch">👁️ Preview</button>

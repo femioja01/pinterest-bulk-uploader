@@ -1680,8 +1680,8 @@ async def recalculate_batch_publish_dates(batch_id: int, request: Request):
         if not batch:
             return JSONResponse({"error": "Batch not found"}, status_code=404)
 
-        if batch.status != BatchStatus.PENDING:
-            return JSONResponse({"error": f"Can only update publish dates for pending batches (current status: {batch.status.value})"}, status_code=400)
+        if batch.status not in (BatchStatus.PENDING, BatchStatus.FAILED):
+            return JSONResponse({"error": f"Can only update publish dates for pending or failed batches (current status: {batch.status.value})"}, status_code=400)
 
         account = session.query(Account).filter(Account.id == batch.account_id).first()
         if not account:
@@ -1692,7 +1692,9 @@ async def recalculate_batch_publish_dates(batch_id: int, request: Request):
         dirs = get_account_dir(account_name)
         csv_file = dirs / "queue" / batch_filename
         if not csv_file.exists():
-            return JSONResponse({"error": f"Batch file not found in queue: {batch_filename}"}, status_code=404)
+            csv_file = dirs / "failed" / batch_filename
+        if not csv_file.exists():
+            return JSONResponse({"error": f"Batch file not found on disk: {batch_filename}"}, status_code=404)
 
         # Default start date if omitted: batch's scheduled_upload_at date or tomorrow
         if not start_date_str:
@@ -1793,6 +1795,8 @@ async def recalculate_campaign_all_publish_dates(request: Request):
 
         for b in pending_batches:
             csv_file = dirs / "queue" / str(b.filename)
+            if not csv_file.exists():
+                csv_file = dirs / "failed" / str(b.filename)
             if not csv_file.exists():
                 continue
 

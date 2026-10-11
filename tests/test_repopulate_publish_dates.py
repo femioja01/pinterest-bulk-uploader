@@ -151,3 +151,38 @@ class TestRepopulatePublishDates(unittest.TestCase):
         self.assertEqual(len(b2_dates), 10)
         self.assertTrue(b2_dates[0].startswith("2026-12-02T08:00"))
         self.assertTrue(b2_dates[-1].startswith("2026-12-02T20:00"))
+
+    def test_recalculate_failed_batch_publish_dates(self):
+        # Move b2 file to failed directory and set its status to FAILED
+        failed_dir = self.dirs["failed"]
+        failed_file = failed_dir / self.batch_filename_2
+        if self.batch_file_2.exists():
+            self.batch_file_2.rename(failed_file)
+
+        with self.factory() as session:
+            batch = session.query(Batch).filter(Batch.id == self.b2_id).first()
+            batch.status = BatchStatus.FAILED
+            session.commit()
+
+        target_start_date = "2026-11-15"
+        payload = {
+            "start_date": target_start_date,
+            "daily_start": "10:00",
+            "daily_end": "19:00",
+            "pins_per_day": 5,
+        }
+        res = self.client.post(f"/api/history/{self.b2_id}/recalculate-publish-dates", json=payload)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data.get("success"))
+        self.assertEqual(data.get("pins_updated"), 10)
+
+        # Check updated CSV in failed/ directory
+        df = pd.read_csv(failed_file)
+        pub_dates = df["Publish Date"].dropna().tolist()
+        self.assertEqual(len(pub_dates), 10)
+        self.assertTrue(pub_dates[0].startswith("2026-11-15T10:00"))
+
+        # Clean up failed file
+        failed_file.unlink(missing_ok=True)
+
