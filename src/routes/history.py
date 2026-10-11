@@ -314,6 +314,7 @@ async def history_page(
                 "cancelled_count": cancelled_count,
                 "pct_done": pct_done,
                 "first_pending_id": first_pending_id,
+                "batch_ids": [b.id for b in b_list],
                 "batches": b_details,
             }
 
@@ -1391,4 +1392,57 @@ async def reslice_group(data: dict = Body(...)):
     }
 
 
+@router.post("/api/history/rename-card", response_class=JSONResponse)
+async def rename_card(data: dict = Body(...)):
+    """Rename a master campaign card and all its associated batch records."""
+    account_id = data.get("account_id")
+    old_name = (data.get("old_name") or data.get("original_filename") or "").strip()
+    new_name = (data.get("new_name") or "").strip()
+    batch_ids = data.get("batch_ids") or []
 
+    if not new_name:
+        return JSONResponse({"error": "Card name cannot be empty."}, status_code=400)
+
+    factory = get_session_factory()
+    updated_count = 0
+    with factory() as session:
+        query = session.query(Batch)
+        if batch_ids:
+            query = query.filter(Batch.id.in_(batch_ids))
+        elif account_id and old_name:
+            query = query.filter(Batch.account_id == account_id, Batch.original_filename == old_name)
+        else:
+            return JSONResponse({"error": "Insufficient parameters to identify card."}, status_code=400)
+
+        batches = query.all()
+        if not batches:
+            return JSONResponse({"error": "No batches found for this card."}, status_code=404)
+
+        target_account_id = account_id or batches[0].account_id
+        for b in batches:
+            b.original_filename = new_name
+            updated_count += 1
+
+        # Also rename any physical master file on disk if present
+        account = session.query(Account).filter(Account.id == target_account_id).first()
+        if account and old_name:
+            dirs = get_account_dir(account.name)
+            for subdir in ["done", "pins"]:
+                sub_path = dirs / subdir
+                if sub_path.exists():
+                    for candidate in list(sub_path.glob(f"*{old_name}*")):
+                        if candidate.is_file() and not candidate.name.startswith("batch_"):
+                            new_file_name = candidate.name.replace(old_name, new_name)
+                            try:
+                                candidate.rename(sub_path / new_file_name)
+                            except Exception as e:
+                                logger.warning(f"Could not rename master file on disk {candidate}: {e}")
+
+        session.add(ActivityLog(
+            account_id=target_account_id,
+            event_type="card_renamed",
+            message=f"Renamed campaign card '{old_name}' to '{new_name}' ({updated_count} batches updated)",
+        ))
+        session.commit()
+
+    return {"success": True, "message": f"Successfully renamed card to '{new_name}'!"}
