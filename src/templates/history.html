@@ -95,7 +95,7 @@
                     <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.74rem; padding: 2px 7px; height: auto;" data-group-id="{{ group.group_id }}" data-account-id="{{ group.account_id }}" data-card-name="{{ group.original_filename }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerRenameCardModal(this)" title="Rename this campaign card">
                         ✏️ Rename
                     </button>
-                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.74rem; padding: 2px 8px; height: auto;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
+                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.74rem; padding: 2px 8px; height: auto;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
                         ➕ Add Pins
                     </button>
                     <span class="text-muted" style="font-size: 0.82rem;">
@@ -104,7 +104,7 @@
                 </div>
 
                 <div class="d-flex gap-2 align-center" style="flex-wrap: wrap;">
-                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.78rem;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
+                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.78rem;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
                         ➕ Add Pins
                     </button>
 
@@ -332,7 +332,7 @@
                     <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.74rem; padding: 2px 7px; height: auto;" data-group-id="{{ group.group_id }}" data-account-id="{{ group.account_id }}" data-card-name="{{ group.original_filename }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerRenameCardModal(this)" title="Rename this campaign card">
                         ✏️ Rename
                     </button>
-                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.74rem; padding: 2px 8px; height: auto;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
+                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.74rem; padding: 2px 8px; height: auto;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
                         ➕ Add Pins
                     </button>
                     <span class="text-muted" style="font-size: 0.82rem;">
@@ -341,7 +341,7 @@
                 </div>
 
                 <div class="d-flex gap-2 align-center">
-                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.8rem;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
+                    <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.8rem;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
                         ➕ Add Pins
                     </button>
                     <button type="button" class="btn btn-secondary btn-sm" style="font-size: 0.8rem;" data-group-id="{{ group.group_id }}" data-account-id="{{ group.account_id }}" data-card-name="{{ group.original_filename }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerRenameCardModal(this)" title="Rename this campaign card">
@@ -1006,14 +1006,23 @@
         const accountName = btn.getAttribute('data-account-name') || '';
         const cardName = btn.getAttribute('data-card-name') || '';
         const pendingCount = parseInt(btn.getAttribute('data-pending-count') || '0', 10);
-        openAppendPinsModal(campaignId, accountId, accountName, cardName, pendingCount);
+        let batchIds = [];
+        try {
+            batchIds = JSON.parse(btn.getAttribute('data-batch-ids') || '[]');
+        } catch (e) {
+            batchIds = [];
+        }
+        openAppendPinsModal(campaignId, accountId, accountName, cardName, pendingCount, batchIds);
     }
 
-    function openAppendPinsModal(campaignId, accountId, accountName, cardName, pendingCount) {
+    let appendBatchIds = [];
+
+    function openAppendPinsModal(campaignId, accountId, accountName, cardName, pendingCount, batchIds) {
         appendCampaignId = campaignId;
         appendAccountId = accountId;
         appendCardName = cardName;
         appendPendingCount = pendingCount || 0;
+        appendBatchIds = batchIds || [];
 
         const modal = document.getElementById('modal-append-pins');
         if (!modal) return;
@@ -1115,6 +1124,9 @@
         formData.append('original_filename', appendCardName);
         if (appendCampaignId) {
             formData.append('campaign_id', appendCampaignId);
+        }
+        if (appendBatchIds && appendBatchIds.length > 0) {
+            formData.append('batch_ids', JSON.stringify(appendBatchIds));
         }
 
         const batchSize = parseInt(document.getElementById('append-batch-size').value, 10) || 50;

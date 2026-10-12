@@ -152,3 +152,48 @@ class TestAppendToCard(unittest.TestCase):
             # Check custom start time applied (custom_time was passed in local time e.g. Africa/Lagos UTC+1, stored in UTC)
             expected_utc = (datetime.strptime(custom_time, "%Y-%m-%dT%H:%M") - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
             self.assertEqual(batches[2].scheduled_upload_at.strftime("%Y-%m-%d %H:%M"), expected_utc)
+
+    def test_append_with_batch_ids_and_legacy_campaign(self):
+        # Create a legacy batch without campaign_id
+        with self.factory() as session:
+            legacy_b = Batch(
+                account_id=self.account_id,
+                campaign_id=None,
+                filename="legacy_batch_001.csv",
+                original_filename="Legacy Campaign Card",
+                pin_count=20,
+                status=BatchStatus.DONE,
+                scheduled_upload_at=self.now,
+                uploaded_at=self.now,
+            )
+            session.add(legacy_b)
+            session.commit()
+            session.refresh(legacy_b)
+            legacy_id = legacy_b.id
+
+        # Pass synthesized campaign_id and batch_ids like UI does
+        synth_cid = f"camp_{self.account_id}_{int(self.now.timestamp())}_{legacy_id}"
+        csv_rows = ["Title,Media URL,Pinterest board,Thumbnail,Description,Link,Publish date,Keywords"]
+        for i in range(1, 11):
+            csv_rows.append(f"Legacy Pin {i},https://example.com/leg{i}.jpg,Home,,Pin desc {i},https://myblog.com/leg,,decor")
+        csv_content = "\n".join(csv_rows).encode("utf-8")
+
+        response = self.client.post(
+            "/api/history/append-to-card",
+            data={
+                "account_id": self.account_id,
+                "original_filename": "Legacy Campaign Card",
+                "campaign_id": synth_cid,
+                "batch_ids": f"[{legacy_id}]",
+                "batch_size": 10,
+                "schedule_mode": "custom",
+                "custom_start_time": (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%dT10:00"),
+                "interval_spacing": "1_days",
+            },
+            files={"file": ("legacy_new.csv", io.BytesIO(csv_content), "text/csv")}
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data.get("success"))
+        self.assertEqual(data.get("pins_count"), 10)
+

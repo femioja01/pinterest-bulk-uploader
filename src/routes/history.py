@@ -264,10 +264,19 @@ async def history_page(
                             break
             if matched_key:
                 groups_dict[matched_key].append(b)
+                if not b.campaign_id:
+                    b.campaign_id = matched_key[1]
             else:
                 cid = b.campaign_id or f"camp_{b.account_id}_{int(b_time.timestamp())}_{b.id}"
                 key = (b.account_id, cid, b.original_filename or "Bulk Upload", b_time)
                 groups_dict[key].append(b)
+                if not b.campaign_id:
+                    b.campaign_id = cid
+
+        try:
+            session.commit()
+        except Exception:
+            pass
 
         active_groups = []
         archived_groups = []
@@ -1469,6 +1478,7 @@ async def append_to_card(
     card_name: str = Form(""),
     original_filename: str = Form(""),
     campaign_id: str = Form(""),
+    batch_ids: str = Form(""),
     batch_size: int = Form(50),
     schedule_mode: str = Form("continue"),
     custom_start_datetime: str = Form(""),
@@ -1484,6 +1494,14 @@ async def append_to_card(
     card_name = card_name or original_filename
     pasted_data = pasted_data or paste_data
     custom_start_datetime = custom_start_datetime or custom_start_time
+
+    # Parse batch_ids if passed from UI
+    parsed_batch_ids = []
+    if batch_ids:
+        try:
+            parsed_batch_ids = json.loads(batch_ids) if isinstance(batch_ids, str) else list(batch_ids)
+        except Exception:
+            pass
 
     if interval_spacing:
         # e.g. "2_days", "12_hours"
@@ -1505,11 +1523,46 @@ async def append_to_card(
             return JSONResponse({"error": "Account not found"}, status_code=404)
         account_name = account.name
 
-        query = session.query(Batch).filter(Batch.account_id == account_id)
-        if campaign_id:
-            existing_batches = query.filter(Batch.campaign_id == campaign_id).all()
-        else:
-            existing_batches = query.filter(Batch.original_filename == card_name).all()
+        existing_batches = []
+
+        # 1. First priority: match by explicit batch_ids belonging to this card
+        if parsed_batch_ids:
+            existing_batches = session.query(Batch).filter(
+                Batch.account_id == account_id,
+                Batch.id.in_(parsed_batch_ids)
+            ).all()
+
+        # 2. Second priority: match by campaign_id in database
+        if not existing_batches and campaign_id:
+            existing_batches = session.query(Batch).filter(
+                Batch.account_id == account_id,
+                Batch.campaign_id == campaign_id
+            ).all()
+
+        # 3. Third priority: match by original_filename / card_name
+        if not existing_batches and card_name:
+            existing_batches = session.query(Batch).filter(
+                Batch.account_id == account_id,
+                Batch.original_filename == card_name
+            ).all()
+
+        # 4. Fallback for synthesized campaign IDs: e.g. camp_{acct}_{timestamp}_{first_batch_id}
+        if not existing_batches and campaign_id and campaign_id.startswith(f"camp_{account_id}_"):
+            parts = campaign_id.split("_")
+            if len(parts) >= 4 and parts[-1].isdigit():
+                anchor_batch_id = int(parts[-1])
+                anchor_batch = session.query(Batch).filter(Batch.id == anchor_batch_id, Batch.account_id == account_id).first()
+                if anchor_batch:
+                    # Find all batches matching anchor's original_filename within 5 mins
+                    anchor_time = anchor_batch.created_at or datetime.min
+                    time_min = anchor_time - timedelta(minutes=5)
+                    time_max = anchor_time + timedelta(minutes=5)
+                    existing_batches = session.query(Batch).filter(
+                        Batch.account_id == account_id,
+                        Batch.original_filename == anchor_batch.original_filename,
+                        Batch.created_at >= time_min,
+                        Batch.created_at <= time_max
+                    ).all()
 
         if not existing_batches:
             return JSONResponse({"error": "Target campaign card not found."}, status_code=404)
