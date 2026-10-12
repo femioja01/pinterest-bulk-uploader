@@ -1539,12 +1539,28 @@ async def append_to_card(
                 Batch.campaign_id == campaign_id
             ).all()
 
-        # 3. Third priority: match by original_filename / card_name
+        # 3. Third priority: match by original_filename / card_name (exact, stripped, or case-insensitive)
         if not existing_batches and card_name:
+            c_name_clean = card_name.strip()
             existing_batches = session.query(Batch).filter(
                 Batch.account_id == account_id,
-                Batch.original_filename == card_name
+                Batch.original_filename == c_name_clean
             ).all()
+
+            if not existing_batches:
+                existing_batches = session.query(Batch).filter(
+                    Batch.account_id == account_id,
+                    Batch.original_filename.ilike(c_name_clean)
+                ).all()
+
+            # Also check if card was renamed but batches retain original filename with or without .csv
+            if not existing_batches:
+                clean_no_ext = c_name_clean[:-4] if c_name_clean.lower().endswith(".csv") else c_name_clean
+                clean_with_ext = f"{c_name_clean}.csv" if not c_name_clean.lower().endswith(".csv") else c_name_clean
+                existing_batches = session.query(Batch).filter(
+                    Batch.account_id == account_id,
+                    (Batch.original_filename.ilike(clean_no_ext) | Batch.original_filename.ilike(clean_with_ext))
+                ).all()
 
         # 4. Fallback for synthesized campaign IDs: e.g. camp_{acct}_{timestamp}_{first_batch_id}
         if not existing_batches and campaign_id and campaign_id.startswith(f"camp_{account_id}_"):
@@ -1564,7 +1580,20 @@ async def append_to_card(
                         Batch.created_at <= time_max
                     ).all()
 
+        # 5. Last-resort fallback: if only 1 campaign card matches or partial substring
+        if not existing_batches and card_name:
+            sub = card_name.strip()[:20]
+            if len(sub) >= 4:
+                existing_batches = session.query(Batch).filter(
+                    Batch.account_id == account_id,
+                    Batch.original_filename.ilike(f"%{sub}%")
+                ).all()
+
         if not existing_batches:
+            logger.warning(
+                f"[append_to_card] Card not found for account_id={account_id}, "
+                f"card_name='{card_name}', campaign_id='{campaign_id}', parsed_batch_ids={parsed_batch_ids}"
+            )
             return JSONResponse({"error": "Target campaign card not found."}, status_code=404)
 
         target_campaign_id = campaign_id or existing_batches[0].campaign_id or f"camp_{account_id}_{int(datetime.now(timezone.utc).timestamp())}"
