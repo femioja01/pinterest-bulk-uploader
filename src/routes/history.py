@@ -1589,21 +1589,25 @@ async def append_to_card(
                     Batch.original_filename.ilike(f"%{sub}%")
                 ).all()
 
-        if not existing_batches:
-            logger.warning(
-                f"[append_to_card] Card not found for account_id={account_id}, "
-                f"card_name='{card_name}', campaign_id='{campaign_id}', parsed_batch_ids={parsed_batch_ids}"
-            )
-            return JSONResponse({"error": "Target campaign card not found."}, status_code=404)
+        # If still no existing batches found by any matching criteria, do NOT error out!
+        # Fall back gracefully: create a new campaign target for this card name under the account.
+        target_campaign_id = (
+            campaign_id
+            or (existing_batches[0].campaign_id if existing_batches else None)
+            or f"camp_{account_id}_{int(datetime.now(timezone.utc).timestamp())}"
+        )
+        target_card_name = (
+            card_name
+            or (existing_batches[0].original_filename if existing_batches else None)
+            or "Bulk Upload"
+        )
 
-        target_campaign_id = campaign_id or existing_batches[0].campaign_id or f"camp_{account_id}_{int(datetime.now(timezone.utc).timestamp())}"
-        target_card_name = card_name or existing_batches[0].original_filename or "Bulk Upload"
-
-        # Backfill campaign_id on any legacy batches for this card
-        for eb in existing_batches:
-            if not eb.campaign_id:
-                eb.campaign_id = target_campaign_id
-        session.commit()
+        # Backfill campaign_id on any legacy batches for this card if batches were matched
+        if existing_batches:
+            for eb in existing_batches:
+                if not eb.campaign_id:
+                    eb.campaign_id = target_campaign_id
+            session.commit()
 
         existing_pending = [b for b in existing_batches if b.status == BatchStatus.PENDING and b.scheduled_upload_at]
         tz_str = get_setting(session, "timezone", "Africa/Lagos")
