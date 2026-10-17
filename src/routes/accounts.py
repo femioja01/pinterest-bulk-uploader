@@ -58,6 +58,27 @@ async def accounts_page(request: Request):
     )
 
 
+@router.get("/api/accounts", response_class=JSONResponse)
+async def list_accounts_api():
+    """Return JSON list of configured Pinterest accounts."""
+    factory = get_session_factory()
+    with factory() as session:
+        accounts = session.query(Account).order_by(Account.created_at.desc()).all()
+        return {
+            "accounts": [
+                {
+                    "id": a.id,
+                    "name": a.name,
+                    "batch_size": a.batch_size,
+                    "enabled": a.enabled,
+                    "session_valid": a.session_valid,
+                    "schedule_cron": a.schedule_cron or "",
+                }
+                for a in accounts
+            ]
+        }
+
+
 @router.post("/api/accounts", response_class=JSONResponse)
 async def create_account(
     name: str = Form(...),
