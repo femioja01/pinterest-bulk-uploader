@@ -77,10 +77,18 @@ def clean_title(text: str, max_len: int = 100) -> str:
 
 
 def find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    """Finds a matching column name in the DataFrame case-insensitively."""
+    """Finds a matching column name in the DataFrame case-insensitively and space/underscore agnostic."""
+    # First exact lower match
     for c in candidates:
         for col in df.columns:
-            if col.strip().lower() == c.strip().lower():
+            if str(col).strip().lower() == c.strip().lower():
+                return col
+    # Then normalized match (stripping spaces, underscores, hyphens)
+    norm_candidates = [re.sub(r"[_\s\-]+", "", c.strip().lower()) for c in candidates]
+    for col in df.columns:
+        col_norm = re.sub(r"[_\s\-]+", "", str(col).strip().lower())
+        for idx, cand_norm in enumerate(norm_candidates):
+            if col_norm == cand_norm:
                 return col
     return None
 
@@ -472,7 +480,7 @@ def format_master_csv(
 
     # Resolve required columns
     title_col = find_col(df, ["pin_title", "title", "pintitle"])
-    media_col = find_col(df, ["Media Link", "media_link", "media_url", "image_url", "image link"])
+    media_col = find_col(df, ["Media Link", "media_link", "Media URL", "media_url", "image_url", "image link", "image"])
     board_col = find_col(df, ["board", "pinterest board", "pinterest_board", "target_board"])
     desc_col = find_col(df, ["pin_description", "description", "pin description", "desc"])
     link_col = find_col(df, ["Article Link", "Article link", "article_link", "link", "blogpost_url", "url"])
@@ -517,8 +525,9 @@ def format_master_csv(
     cleaned_titles = df[title_col].apply(lambda x: clean_title(x, max_len=100))
     cleaned_descriptions = df[desc_col].apply(lambda x: clean_description(x, max_len=500))
 
-    # Pre-generate publish dates if requested
+    # Pre-generate publish dates if requested, or preserve existing Publish Date column if already populated
     pub_dates = []
+    existing_date_col = find_col(df, ["Publish Date", "publish_date", "Publish date"])
     if schedule_publish_dates and len(df) > 0:
         if not publish_start_date:
             publish_start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -531,11 +540,15 @@ def format_master_csv(
             daily_end=publish_daily_end,
             date_format=dt_format,
         )
+    elif existing_date_col and len(df) > 0:
+        existing_vals = df[existing_date_col].astype(str).str.strip()
+        if existing_vals.ne("").any():
+            pub_dates = existing_vals.tolist()
 
     # Build target DataFrame based on selected template
     out_df = pd.DataFrame()
     if target_template.lower() == "publer":
-        out_df["Date - Intl. format or prompt"] = pub_dates if schedule_publish_dates else ""
+        out_df["Date - Intl. format or prompt"] = pub_dates if pub_dates else ""
         out_df["Text"] = cleaned_descriptions
         out_df["Link(s) - Separated by comma for FB carousels"] = df[link_col].astype(str).str.strip()
         out_df["Media URL(s) - Separated by comma"] = df[media_col].astype(str).str.strip()
@@ -558,7 +571,7 @@ def format_master_csv(
         out_df["Thumbnail"] = ""
         out_df["Description"] = cleaned_descriptions
         out_df["Link"] = df[link_col].astype(str).str.strip()
-        out_df["Publish Date"] = pub_dates if schedule_publish_dates else ""
+        out_df["Publish Date"] = pub_dates if pub_dates else ""
         out_df["Keywords"] = ""
 
         # Drop empty rows

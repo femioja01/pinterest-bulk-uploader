@@ -107,10 +107,20 @@ async def convert_csv_endpoint(
                 clean_name += ".csv"
             orig_name = clean_name
 
+        def _parse_bool(val, default=False):
+            v = _get_val(val, default)
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, (int, float)):
+                return bool(v)
+            if isinstance(v, str):
+                return v.strip().lower() in ("true", "1", "yes", "on")
+            return bool(v)
+
         start_week_val = str(_get_val(start_week, "")).strip()
         end_week_val = str(_get_val(end_week, "")).strip()
         spec_weeks_val = str(_get_val(specific_weeks, "")).strip()
-        schedule_publish_dates = bool(_get_val(schedule_publish_dates, False))
+        schedule_publish_dates = _parse_bool(schedule_publish_dates, False)
         publish_start_date = str(_get_val(publish_start_date, "")).strip()
         publish_pins_per_day = int(_get_val(publish_pins_per_day, 25))
         publish_daily_start = str(_get_val(publish_daily_start, "08:00")).strip()
@@ -218,10 +228,20 @@ async def convert_and_queue_endpoint(
                 clean_name += ".csv"
             orig_filename = clean_name
 
+        def _parse_bool(val, default=False):
+            v = _get_val(val, default)
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, (int, float)):
+                return bool(v)
+            if isinstance(v, str):
+                return v.strip().lower() in ("true", "1", "yes", "on")
+            return bool(v)
+
         start_week_val = str(_get_val(start_week, "")).strip()
         end_week_val = str(_get_val(end_week, "")).strip()
         spec_weeks_val = str(_get_val(specific_weeks, "")).strip()
-        schedule_publish_dates = bool(_get_val(schedule_publish_dates, False))
+        schedule_publish_dates = _parse_bool(schedule_publish_dates, False)
         publish_start_date = str(_get_val(publish_start_date, "")).strip()
         publish_pins_per_day = int(_get_val(publish_pins_per_day, 25))
         publish_daily_start = str(_get_val(publish_daily_start, "08:00")).strip()
