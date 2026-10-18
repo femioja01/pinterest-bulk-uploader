@@ -238,6 +238,8 @@ def split_csv(filepath: Path, batch_size: int, output_dir: Path, prefix: str | N
 
             batch_num = max(1, start_batch_num)
             current_batch_rows = []
+            seen_links_in_batch = set()
+            link_col_idx = PINTEREST_CSV_COLUMNS.index("Link") if "Link" in PINTEREST_CSV_COLUMNS else -1
 
             for row in reader:
                 if not any(cell.strip() for cell in row):
@@ -252,22 +254,28 @@ def split_csv(filepath: Path, batch_size: int, output_dir: Path, prefix: str | N
                 standardized_row = [
                     row_dict.get(col, "") for col in PINTEREST_CSV_COLUMNS
                 ]
+                row_link = standardized_row[link_col_idx].strip().rstrip("/").lower() if link_col_idx >= 0 else ""
 
-                current_batch_rows.append(standardized_row)
-
-                if len(current_batch_rows) == batch_size:
+                # Pinterest Bulk Upload constraint: A batch CSV must NEVER contain duplicate destination URLs!
+                # Start a new batch if batch_size reached OR if this destination link is already in the current batch.
+                if current_batch_rows and (len(current_batch_rows) >= batch_size or (row_link and row_link in seen_links_in_batch)):
                     batch_file = output_dir / f"{prefix_str}_{batch_num:03d}.csv"
                     _write_standard_batch(batch_file, current_batch_rows)
                     batch_files.append(batch_file)
                     batch_num += 1
                     current_batch_rows = []
+                    seen_links_in_batch = set()
+
+                current_batch_rows.append(standardized_row)
+                if row_link:
+                    seen_links_in_batch.add(row_link)
 
             if current_batch_rows:
                 batch_file = output_dir / f"{prefix_str}_{batch_num:03d}.csv"
                 _write_standard_batch(batch_file, current_batch_rows)
                 batch_files.append(batch_file)
 
-        logger.info(f"Successfully split {filepath.name} into {len(batch_files)} batches of size ≤ {batch_size}")
+        logger.info(f"Successfully split {filepath.name} into {len(batch_files)} batches of size ≤ {batch_size} (100% unique destination URLs per batch)")
         return batch_files
 
     except Exception as e:
