@@ -349,6 +349,19 @@ async def convert_and_queue_endpoint(
                             p_date = datetime.strptime(date_part, "%Y-%m-%d")
                             naive_dt = p_date.replace(hour=target_hour, minute=target_minute, second=0)
                             local_dt = naive_dt.replace(tzinfo=tz)
+
+                            # Critical Pinterest Lead-Time Guard:
+                            # A bulk CSV upload MUST occur BEFORE any pin inside it is scheduled to publish!
+                            first_pin_norm = first_publish_date_str.replace(" ", "T")[:19]
+                            if "T" in first_pin_norm and len(first_pin_norm) >= 16:
+                                try:
+                                    first_pin_dt = datetime.strptime(first_pin_norm[:16], "%Y-%m-%dT%H:%M").replace(tzinfo=tz)
+                                    # If upload time is after or within 30 mins of the first pin, shift upload to at least 2 hours prior!
+                                    if local_dt >= first_pin_dt - timedelta(minutes=30):
+                                        local_dt = first_pin_dt - timedelta(hours=2)
+                                except Exception:
+                                    pass
+
                             batch_upload_at = local_dt.astimezone(timezone.utc)
                         except Exception as e:
                             logger.warning(f"Could not parse publish date '{first_publish_date_str}' for batch {bf.name}: {e}")
