@@ -593,6 +593,77 @@ async def requeue_group(data: dict = Body(...)):
     return {"success": True, "message": f"Successfully re-queued {requeued_count} batch(es) for scheduled upload!"}
 
 
+@router.post("/api/history/delete-group", response_class=JSONResponse)
+async def delete_group(data: dict = Body(...)):
+    """Permanently delete all batches belonging to a campaign card and remove their files from disk."""
+    account_id = data.get("account_id")
+    card_name = (data.get("card_name") or data.get("original_filename") or "").strip()
+    campaign_id = (data.get("campaign_id") or "").strip()
+    batch_ids = data.get("batch_ids") or []
+
+    factory = get_session_factory()
+    with factory() as session:
+        query = session.query(Batch)
+        if batch_ids:
+            query = query.filter(Batch.id.in_(batch_ids))
+        elif campaign_id:
+            query = query.filter(Batch.campaign_id == campaign_id)
+        elif account_id and card_name:
+            query = query.filter(Batch.account_id == account_id, Batch.original_filename == card_name)
+        else:
+            return JSONResponse({"error": "Insufficient parameters to identify campaign card."}, status_code=400)
+
+        batches = query.all()
+        if not batches:
+            return JSONResponse({"error": "No batches found for this campaign card."}, status_code=404)
+
+        target_account_id = account_id or batches[0].account_id
+        target_card_name = card_name or batches[0].original_filename or "Campaign"
+        deleted_count = len(batches)
+
+        # Delete batch files from disk
+        account = session.query(Account).filter(Account.id == target_account_id).first()
+        if account:
+            dirs = get_account_dir(account.name)
+            for b in batches:
+                b_name = str(b.filename)
+                for subdir in ["queue", "done", "failed"]:
+                    f_path = dirs / subdir / b_name
+                    if f_path.exists():
+                        try:
+                            f_path.unlink(missing_ok=True)
+                        except Exception as e:
+                            logger.warning(f"Could not delete batch file {f_path}: {e}")
+
+            # Also delete any master CSV file on disk if matching target_card_name
+            if target_card_name:
+                for subdir in ["done", "pins"]:
+                    sub_path = dirs / subdir
+                    if sub_path.exists():
+                        for candidate in list(sub_path.glob(f"*{target_card_name}*")):
+                            if candidate.is_file() and not candidate.name.startswith("batch_"):
+                                try:
+                                    candidate.unlink(missing_ok=True)
+                                except Exception as e:
+                                    logger.warning(f"Could not delete master file {candidate}: {e}")
+
+        # Delete all batch records from database
+        for b in batches:
+            session.delete(b)
+
+        session.add(ActivityLog(
+            account_id=target_account_id,
+            event_type="card_deleted",
+            message=f"Deleted campaign card '{target_card_name}' ({deleted_count} batches)",
+        ))
+        session.commit()
+
+    return {
+        "success": True,
+        "message": f"Successfully deleted '{target_card_name}' and all {deleted_count} batch(es)."
+    }
+
+
 @router.post("/api/history/{batch_id}/delete", response_class=JSONResponse)
 async def delete_batch(batch_id: int):
     """Delete a batch entirely from database and remove its file from disk."""

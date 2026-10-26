@@ -335,6 +335,9 @@
                     <button type="button" class="btn btn-primary btn-sm" style="font-size: 0.74rem; padding: 2px 8px; height: auto;" data-campaign-id="{{ group.campaign_id }}" data-account-id="{{ group.account_id }}" data-account-name="{{ group.account_name }}" data-card-name="{{ group.original_filename }}" data-pending-count="{{ group.pending_count }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); triggerAppendPinsModal(this)" title="Add CSV or paste pins into this campaign card">
                         ➕ Add Pins
                     </button>
+                    <button type="button" class="btn btn-danger btn-sm" style="font-size: 0.74rem; padding: 2px 8px; height: auto;" data-group-id="{{ group.group_id }}" data-account-id="{{ group.account_id }}" data-card-name="{{ group.original_filename }}" data-campaign-id="{{ group.campaign_id }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); deleteGroup(this)" title="Permanently delete this completed campaign card and its batches">
+                        🗑 Delete Card
+                    </button>
                     <span class="text-muted" style="font-size: 0.82rem;">
                         • Account: <strong>{{ group.account_name }}</strong> • Uploaded: {{ group.created_at }}
                     </span>
@@ -353,6 +356,9 @@
                     <a href="/api/history/download-master?account_id={{ group.account_id }}&original_filename={{ group.original_filename | urlencode }}" class="btn btn-secondary btn-sm" style="font-size: 0.8rem;" onclick="event.stopPropagation();" title="Download the full original Master CSV containing all pins">
                         📥 Download Master CSV
                     </a>
+                    <button type="button" class="btn btn-danger btn-sm" style="font-size: 0.8rem;" data-group-id="{{ group.group_id }}" data-account-id="{{ group.account_id }}" data-card-name="{{ group.original_filename }}" data-campaign-id="{{ group.campaign_id }}" data-batch-ids="{{ group.batch_ids | tojson }}" onclick="event.stopPropagation(); deleteGroup(this)" title="Permanently delete this completed campaign card and its batches">
+                        🗑 Delete Card
+                    </button>
                     <button class="btn btn-secondary btn-sm" id="btn-toggle-{{ group.group_id }}" style="font-size: 0.8rem;" onclick="event.stopPropagation(); toggleGroupDetails('{{ group.group_id }}')">
                         ▼ View Batches ({{ group.total_batches }})
                     </button>
@@ -392,6 +398,7 @@
                                 <div class="d-flex gap-2">
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openBatchPreview({{ batch.id }})" title="Preview and copy data from this batch">👁️ Preview</button>
                                     <a href="/api/history/{{ batch.id }}/download" class="btn btn-secondary btn-sm" onclick="event.stopPropagation();" title="Download this split batch CSV">Download CSV</a>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); deleteBatch({{ batch.id }})" title="Permanently delete batch">🗑</button>
                                 </div>
                             </td>
                         </tr>
@@ -1680,6 +1687,52 @@
             }
         })
         .catch(() => showToast('Network error', 'error'));
+    }
+
+    function deleteGroup(btnOrAccountId, originalFilename, campaignId, batchIds) {
+        let accId, cardName, campId, bIds;
+        if (typeof btnOrAccountId === 'object' && btnOrAccountId !== null && btnOrAccountId.dataset) {
+            accId = btnOrAccountId.dataset.accountId;
+            cardName = btnOrAccountId.dataset.cardName || '';
+            campId = btnOrAccountId.dataset.campaignId || '';
+            try {
+                bIds = JSON.parse(btnOrAccountId.dataset.batchIds || '[]');
+            } catch(e) {
+                bIds = [];
+            }
+        } else {
+            accId = btnOrAccountId;
+            cardName = originalFilename || '';
+            campId = campaignId || '';
+            bIds = Array.isArray(batchIds) ? batchIds : [];
+        }
+
+        const displayName = cardName || campId || 'this campaign card';
+        if (!confirm(`Permanently delete completed campaign '${displayName}' and all its batches? This cannot be undone.`)) {
+            return;
+        }
+
+        fetch('/api/history/delete-group', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                account_id: accId ? parseInt(accId) : null,
+                card_name: cardName,
+                original_filename: cardName,
+                campaign_id: campId,
+                batch_ids: bIds
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast(data.message || 'Campaign card deleted successfully', 'success');
+                setTimeout(() => window.location.reload(), 800);
+            } else {
+                showToast(data.error || 'Failed to delete campaign card', 'error');
+            }
+        })
+        .catch(() => showToast('Network error while deleting campaign card', 'error'));
     }
 
     function deleteBatch(batchId) {
