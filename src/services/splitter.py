@@ -237,8 +237,7 @@ def split_csv(filepath: Path, batch_size: int, output_dir: Path, prefix: str | N
             normalized_headers = [_normalize_header_name(h) for h in raw_header]
 
             batch_num = max(1, start_batch_num)
-            current_batch_rows = []
-            seen_links_in_batch = set()
+            all_rows = []
             link_col_idx = PINTEREST_CSV_COLUMNS.index("Link") if "Link" in PINTEREST_CSV_COLUMNS else -1
 
             for row in reader:
@@ -254,28 +253,31 @@ def split_csv(filepath: Path, batch_size: int, output_dir: Path, prefix: str | N
                 standardized_row = [
                     row_dict.get(col, "") for col in PINTEREST_CSV_COLUMNS
                 ]
-                row_link = standardized_row[link_col_idx].strip().rstrip("/").lower() if link_col_idx >= 0 else ""
+                all_rows.append(standardized_row)
 
-                # Pinterest Bulk Upload constraint: A batch CSV must NEVER contain duplicate destination URLs!
-                # Start a new batch if batch_size reached OR if this destination link is already in the current batch.
-                if current_batch_rows and (len(current_batch_rows) >= batch_size or (row_link and row_link in seen_links_in_batch)):
-                    batch_file = output_dir / f"{prefix_str}_{batch_num:03d}.csv"
-                    _write_standard_batch(batch_file, current_batch_rows)
-                    batch_files.append(batch_file)
-                    batch_num += 1
-                    current_batch_rows = []
-                    seen_links_in_batch = set()
+            # Ensure no two consecutive rows hit the exact same destination URL back-to-back
+            if link_col_idx >= 0 and len(all_rows) > 1:
+                def _norm_link(r: list[str]) -> str:
+                    return r[link_col_idx].strip().rstrip("/").lower()
 
-                current_batch_rows.append(standardized_row)
-                if row_link:
-                    seen_links_in_batch.add(row_link)
+                for i in range(1, len(all_rows)):
+                    cur_l = _norm_link(all_rows[i])
+                    prev_l = _norm_link(all_rows[i - 1])
+                    if cur_l and cur_l == prev_l:
+                        for j in range(i + 1, len(all_rows)):
+                            if _norm_link(all_rows[j]) != prev_l:
+                                all_rows[i], all_rows[j] = all_rows[j], all_rows[i]
+                                break
 
-            if current_batch_rows:
+            # Slice strictly by batch_size
+            for start_idx in range(0, len(all_rows), batch_size):
+                chunk = all_rows[start_idx : start_idx + batch_size]
                 batch_file = output_dir / f"{prefix_str}_{batch_num:03d}.csv"
-                _write_standard_batch(batch_file, current_batch_rows)
+                _write_standard_batch(batch_file, chunk)
                 batch_files.append(batch_file)
+                batch_num += 1
 
-        logger.info(f"Successfully split {filepath.name} into {len(batch_files)} batches of size ≤ {batch_size} (100% unique destination URLs per batch)")
+        logger.info(f"Successfully split {filepath.name} into {len(batch_files)} batches of size ≤ {batch_size}")
         return batch_files
 
     except Exception as e:
