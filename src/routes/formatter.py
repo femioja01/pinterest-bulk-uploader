@@ -196,6 +196,8 @@ async def convert_and_queue_endpoint(
     queue_first_date: str = Form(""),
     queue_interval_days: int = Form(2),
     custom_filename: str = Form(""),
+    campaign_id: str = Form(""),
+    append_to_existing_card: bool = Form(True),
 ):
     """Format master CSV or pasted text and immediately split & queue for an account."""
     factory = get_session_factory()
@@ -279,10 +281,37 @@ async def convert_and_queue_endpoint(
         # Write formatted CSV to pins dir
         out_df.to_csv(master_path, index=False, encoding="utf-8-sig")
 
-        # Split into batches with account & timestamp prefix
+        # Check if an existing campaign card matches orig_filename or campaign_id to group together
+        append_card_val = _parse_bool(append_to_existing_card, default=True)
+        explicit_camp_id = str(_get_val(campaign_id, "")).strip()
+        matched_campaign_id = None
+        start_batch_idx = 1
+        card_prefix_timestamp = timestamp
+
+        with factory() as session:
+            account_row = session.query(Account).filter(Account.name == account_name).first()
+            if account_row and append_card_val:
+                cand_query = session.query(Batch).filter(Batch.account_id == account_row.id)
+                if explicit_camp_id:
+                    cand_batches = cand_query.filter(Batch.campaign_id == explicit_camp_id).order_by(Batch.id.asc()).all()
+                else:
+                    cand_batches = cand_query.filter(
+                        (Batch.original_filename == orig_filename) | (Batch.original_filename.ilike(orig_filename))
+                    ).order_by(Batch.id.asc()).all()
+
+                if cand_batches:
+                    matched_campaign_id = cand_batches[0].campaign_id
+                    start_batch_idx = len(cand_batches) + 1
+                    # Extract timestamp from existing campaign_id if available to keep consistent prefix
+                    if matched_campaign_id and matched_campaign_id.startswith(f"camp_{account_row.id}_"):
+                        card_prefix_timestamp = matched_campaign_id.replace(f"camp_{account_row.id}_", "")
+
+        effective_campaign_id = matched_campaign_id or explicit_camp_id or f"camp_{account.id}_{timestamp}"
+
+        # Split into batches with account & timestamp prefix, continuing batch numbering
         batch_size = min(max(batch_size, 1), 100)
-        batch_prefix = f"{clean_acct}_batch_{timestamp}"
-        batch_files = split_csv(master_path, batch_size, dirs["queue"], prefix=batch_prefix)
+        batch_prefix = f"{clean_acct}_batch_{card_prefix_timestamp}"
+        batch_files = split_csv(master_path, batch_size, dirs["queue"], prefix=batch_prefix, start_batch_num=start_batch_idx)
 
         if not batch_files or len(batch_files) == 0:
             return JSONResponse({"error": "Failed to split CSV: No batch files were generated."}, status_code=400)
@@ -381,7 +410,7 @@ async def convert_and_queue_endpoint(
                     account_id=account.id,
                     filename=bf.name,
                     original_filename=orig_filename,
-                    campaign_id=f"camp_{account.id}_{timestamp}",
+                    campaign_id=effective_campaign_id,
                     pin_count=max(0, pin_count),
                     status=BatchStatus.PENDING,
                     created_at=now_utc,
