@@ -53,6 +53,7 @@ class Batch(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     uploaded_at = Column(DateTime, nullable=True)
     scheduled_upload_at = Column(DateTime, nullable=True)
+    cloudinary_purged_at = Column(DateTime, nullable=True)
 
     account = relationship("Account", back_populates="batches")
 
@@ -121,6 +122,9 @@ def init_db():
                 conn.commit()
             if "campaign_id" not in columns_b:
                 conn.execute(text("ALTER TABLE batches ADD COLUMN campaign_id VARCHAR(100)"))
+                conn.commit()
+            if "cloudinary_purged_at" not in columns_b:
+                conn.execute(text("ALTER TABLE batches ADD COLUMN cloudinary_purged_at DATETIME"))
                 conn.commit()
         except Exception:
             pass

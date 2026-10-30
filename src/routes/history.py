@@ -1995,3 +1995,94 @@ async def recalculate_campaign_all_publish_dates(request: Request):
         "last_publish_date": overall_last_date,
     }
 
+
+@router.get("/api/history/cloudinary-cleanup-candidates", response_class=JSONResponse)
+async def get_cloudinary_cleanup_candidates(account_name: Optional[str] = None, min_age_hours: int = 24):
+    """
+    Returns batches that are marked DONE, uploaded at least min_age_hours ago,
+    and have not yet had their Cloudinary URLs purged.
+    Also extracts all Cloudinary image URLs from the archived CSV files.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=min_age_hours)
+    factory = get_session_factory()
+    with factory() as session:
+        query = session.query(Batch).filter(
+            Batch.status == BatchStatus.DONE,
+            Batch.uploaded_at <= cutoff,
+            Batch.cloudinary_purged_at.is_(None),
+        )
+        if account_name:
+            acc = session.query(Account).filter(Account.name == account_name).first()
+            if acc:
+                query = query.filter(Batch.account_id == acc.id)
+
+        done_batches = query.order_by(Batch.uploaded_at.asc()).all()
+        candidates = []
+        total_urls = 0
+
+        for b in done_batches:
+            acc = session.query(Account).filter(Account.id == b.account_id).first()
+            acc_name = acc.name if acc else "unknown"
+            csv_path = get_account_dir(acc_name) / "done" / b.filename
+            urls_in_batch = []
+
+            if csv_path.exists():
+                try:
+                    with open(csv_path, "r", encoding="utf-8-sig", errors="replace") as f:
+                        reader = csv.DictReader(f)
+                        url_col = None
+                        for col in ["Media URL", "media_url", "Media Link", "media_link", "Image URL"]:
+                            if reader.fieldnames and col in reader.fieldnames:
+                                url_col = col
+                                break
+                        if url_col:
+                            for row in reader:
+                                u = (row.get(url_col) or "").strip()
+                                if "cloudinary.com" in u:
+                                    urls_in_batch.append(u)
+                except Exception as e:
+                    logger.error(f"Error reading {csv_path} for Cloudinary cleanup: {e}")
+
+            candidates.append({
+                "batch_id": b.id,
+                "filename": b.filename,
+                "account_name": acc_name,
+                "uploaded_at": b.uploaded_at.strftime("%Y-%m-%d %H:%M:%S UTC") if b.uploaded_at else "",
+                "pin_count": b.pin_count,
+                "cloudinary_url_count": len(urls_in_batch),
+                "cloudinary_urls": urls_in_batch,
+            })
+            total_urls += len(urls_in_batch)
+
+        return {
+            "success": True,
+            "min_age_hours": min_age_hours,
+            "cutoff_time": cutoff.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "eligible_batches_count": len(candidates),
+            "total_cloudinary_urls": total_urls,
+            "batches": candidates,
+        }
+
+
+@router.post("/api/history/mark-cloudinary-purged", response_class=JSONResponse)
+async def mark_cloudinary_purged(request: Request):
+    """Marks batch IDs as having their Cloudinary assets purged."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    batch_ids = body.get("batch_ids") or []
+    if not batch_ids:
+        return JSONResponse({"error": "No batch_ids provided"}, status_code=400)
+
+    factory = get_session_factory()
+    now_utc = datetime.now(timezone.utc)
+    with factory() as session:
+        session.query(Batch).filter(Batch.id.in_(batch_ids)).update(
+            {"cloudinary_purged_at": now_utc},
+            synchronize_session=False,
+        )
+        session.commit()
+    return {"success": True, "updated_count": len(batch_ids)}
+
+
